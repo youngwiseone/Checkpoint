@@ -49,6 +49,7 @@ def setup_logging(level: int = logging.INFO) -> None:
 
 class AppCore:
     def __init__(self) -> None:
+        from .capture.auto import AutoCaptureWorker
         from .extraction.worker import ExtractionWorker
         from .services.capture import CaptureService
         from .services.sessions import SessionManager
@@ -62,6 +63,7 @@ class AppCore:
         self.transcriber = TranscriptionWorker()
         self.organiser = ExtractionWorker()
         self.sync = SyncWorker()
+        self.autocapture = AutoCaptureWorker(self.sessions, self.capture)
         self.sessions.set_chunk_callback(lambda _cid: self.transcriber.wake())
         self.supervisor = None
         self.started = False
@@ -78,9 +80,9 @@ class AppCore:
             notices.push("info", f"Requeued {n} transcription job(s) that were interrupted.", "recovery")
         recover_runs()
         if workers:
-            for w in (self.transcriber, self.organiser, self.sync):
+            for w in (self.transcriber, self.organiser, self.sync, self.autocapture):
                 w.start()
-            self.supervisor = Supervisor([self.transcriber, self.organiser, self.sync], [lambda: stale_recorder_check(self.sessions)])
+            self.supervisor = Supervisor([self.transcriber, self.organiser, self.sync, self.autocapture], [lambda: stale_recorder_check(self.sessions)])
             self.supervisor.start()
         self.started = True
         log.info("Checkpoint core started; data in %s", paths().root)
@@ -93,8 +95,9 @@ class AppCore:
             log.exception("Error ending session on shutdown")
         if self.supervisor:
             self.supervisor.stop()
-        for w in (self.transcriber, self.organiser, self.sync):
+        for w in (self.transcriber, self.organiser, self.sync, self.autocapture):
             w.stop(timeout=3)
+        self.autocapture.frames.stop()
 
     def worker_status(self) -> dict:
         from .settings_store import get_settings
@@ -113,6 +116,7 @@ class AppCore:
             },
             "organiser": {"alive": self.organiser.alive, "busy": self.organiser.busy, "current_run": self.organiser.current_run,
                           "enabled": st.ai.enabled, "error": self.organiser.last_error},
+            "auto_capture": self.autocapture.status(),
             "sync": {"alive": self.sync.alive, "busy": self.sync.busy, "offline_reason": self.sync.offline_reason,
                      "last_ok": self.sync.last_ok, "configured": bool(st.sharing.server_url)},
         }

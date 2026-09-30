@@ -67,6 +67,9 @@ Checkpoint never uploads anything itself, and audio or full transcripts are neve
   NVIDIA GPU optional with automatic CPU fallback. See [docs/models.md](docs/models.md).
 - **Local AI organisation** — install [Ollama](https://ollama.com), then Settings → Local AI → download
   `qwen3:4b` and turn it on. Text-only; it never sees screenshots and never calls a cloud service.
+- **Auto screenshots** — Settings → Local AI → Auto screenshots. During a session with **live** transcription,
+  a small local model (default `qwen3:1.7b`) reads each transcript line and only decides *capture* or *skip*.
+  The last ~90 s of screen is kept in memory, so a picked line saves the frame from when it was said, as a marker.
 - **Shared workspace** — run the small server in [`backend/server`](backend/server) with PostgreSQL; see
   [docs/shared-server.md](docs/shared-server.md).
 

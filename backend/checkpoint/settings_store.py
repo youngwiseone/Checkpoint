@@ -58,6 +58,16 @@ class AISettings(BaseModel):
     window_after_s: int = 20
 
 
+class AutoCaptureSettings(BaseModel):
+    # A local model reads the live transcript and decides when a screenshot is worth taking.
+    enabled: bool = False
+    model: str = "qwen3:1.7b"
+    frame_interval_s: float = 2.0
+    buffer_seconds: int = 90
+    cooldown_s: int = 15
+    max_per_session: int = 40
+
+
 class SharingSettings(BaseModel):
     server_url: str = ""
     display_name: str = ""
@@ -71,6 +81,7 @@ class AppSettings(BaseModel):
     audio: AudioPrefs = Field(default_factory=AudioPrefs)
     transcription: TranscriptionSettings = Field(default_factory=TranscriptionSettings)
     ai: AISettings = Field(default_factory=AISettings)
+    auto_capture: AutoCaptureSettings = Field(default_factory=AutoCaptureSettings)
     sharing: SharingSettings = Field(default_factory=SharingSettings)
     last_project_id: Optional[str] = None
 

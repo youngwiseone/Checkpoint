@@ -217,7 +217,7 @@ class Capture(Base):
     height: Mapped[int] = mapped_column(Integer)
     monitor: Mapped[Any] = mapped_column(JSON, default=dict)
     window_title: Mapped[str] = mapped_column(String(500), default="")
-    trigger: Mapped[str] = mapped_column(String(30), default="hotkey")  # hotkey | hotkey_context | api | demo
+    trigger: Mapped[str] = mapped_column(String(30), default="hotkey")  # hotkey | hotkey_context | auto | api | demo
     # saved (has note or audio context) | marker (audio on, awaiting transcript) | unfinished | discarded
     status: Mapped[str] = mapped_column(String(20), default="unfinished", index=True)
     needs_context: Mapped[bool] = mapped_column(Boolean, default=False)

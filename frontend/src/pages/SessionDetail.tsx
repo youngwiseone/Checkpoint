@@ -261,13 +261,14 @@ function UnlinkedScreenshots({ d }: { d: SD }) {
   const label: Record<string, string> = { speech_nearby: "Speech nearby", awaiting_transcription: "Waiting for transcription", needs_context: "Needs context — no speech found nearby", transcription_failed: "Transcription failed nearby" };
   return (
     <div className="card">
-      <div className="card-head"><h3>Screenshots without a card</h3><span className="muted small">Markers from F8 while audio was recording</span></div>
+      <div className="card-head"><h3>Screenshots without a card</h3><span className="muted small">Markers from F8 or auto screenshots while audio was recording</span></div>
       <div className="stack">
         {q.data.map((c) => (
           <div key={c.id} className="row top" style={{ gap: 14 }}>
             <img src={c.thumb_url} className="thumb" style={{ width: 176, height: 99 }} alt={`Screenshot at ${fmtOffset(c.offset_ms)}`} onClick={() => setZoom(c.image_url)} />
             <div className="grow">
               <div className="row"><b className="mono">{fmtOffset(c.offset_ms)}</b>
+                {c.trigger === "auto" && <span className="badge neutral" title="Picked by the auto-screenshot model from the live transcript">Auto</span>}
                 <span className={`badge ${c.context_state === "needs_context" ? "warn" : c.context_state === "speech_nearby" ? "accent" : "neutral"}`}>{label[c.context_state ?? ""] ?? c.context_state}</span></div>
               {c.nearby?.slice(0, 3).map((n) => <p key={n.id} className="small text-2">[{fmtOffset(n.offset_ms)}] {n.text}</p>)}
               <div className="row" style={{ marginTop: 6 }}>

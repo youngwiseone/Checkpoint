@@ -56,6 +56,7 @@ export interface AppState {
   workers: {
     transcription: { alive: boolean; busy: boolean; paused: boolean; model: string; model_installed: boolean; error: string | null; gpu_fallback: string | null; stalled?: boolean; device?: string };
     organiser: { alive: boolean; busy: boolean; current_run: string | null; enabled: boolean; error: string | null };
+    auto_capture: { alive: boolean; enabled: boolean; state: "off" | "needs_live" | "watching"; count: number; error: string | null };
     sync: { alive: boolean; busy: boolean; offline_reason: string | null; last_ok: string | null; configured: boolean };
   };
   desktop: { available: boolean; hotkeys: { ok?: boolean; bindings?: HotkeyBinding[]; reason?: string | null } };
@@ -251,6 +252,7 @@ export interface Capture {
   offset_ms: number | null;
   taken_at: string;
   status: string;
+  trigger?: string;
   window_title: string;
   thumb_url: string;
   image_url: string;
@@ -289,6 +291,7 @@ export interface Settings {
   };
   transcription: { model: string; device: "cpu" | "cuda"; compute_type: string; default_mode: "after" | "live" | "off"; paused: boolean; cpu_threads: number; overlap_seconds: number };
   ai: { enabled: boolean; base_url: string; model: string; timeout_seconds: number; max_retries: number; chunk_chars: number; chunk_overlap_items: number; window_before_s: number; window_after_s: number };
+  auto_capture: { enabled: boolean; model: string; frame_interval_s: number; buffer_seconds: number; cooldown_s: number; max_per_session: number };
   sharing: { server_url: string; display_name: string; allow_insecure_private_network: boolean };
   last_project_id: string | null;
   data_dir: string;

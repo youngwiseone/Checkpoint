@@ -584,7 +584,7 @@ class NoteIn(BaseModel):
 
 def capture_dict(c: Capture) -> dict:
     return {"id": c.id, "session_id": c.session_id, "project_id": c.project_id, "offset_ms": c.offset_ms, "taken_at": _iso(c.taken_at),
-            "status": c.status, "window_title": c.window_title, "width": c.width, "height": c.height,
+            "status": c.status, "trigger": c.trigger, "window_title": c.window_title, "width": c.width, "height": c.height,
             "thumb_url": f"/api/media/captures/{c.id}/thumb", "image_url": f"/api/media/captures/{c.id}/image"}
 
 

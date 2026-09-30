@@ -174,6 +174,7 @@ function LocalAI({ s }: { s: Settings }) {
           </div>
         )}
       </div>
+      <AutoCapture s={s} installed={d?.reachable ? d.models.map((m) => m.name) : null} onPull={(m) => pull.mutate(m)} pulls={d?.pulls ?? {}} />
       <details className="card">
         <summary className="label" style={{ cursor: "pointer" }}>Advanced</summary>
         <div className="grid-2" style={{ marginTop: 12 }}>
@@ -184,6 +185,50 @@ function LocalAI({ s }: { s: Settings }) {
         </div>
         <p className="hint" style={{ marginTop: 8 }}>Screenshots taken within this window around a spoken observation are suggested as possibly related — never attached as proof.</p>
       </details>
+    </div>
+  );
+}
+
+function AutoCapture({ s, installed, onPull, pulls }: { s: Settings; installed: string[] | null; onPull: (m: string) => void; pulls: Record<string, { state: string; status: string; error: string | null }> }) {
+  const patch = usePatch();
+  const { data: appState } = useAppState();
+  const a = s.auto_capture;
+  const [model, setModel] = useState(a.model);
+  const w = appState?.workers.auto_capture;
+  const has = installed?.includes(a.model) || installed?.includes(`${a.model}:latest`);
+  const p = pulls[a.model];
+  return (
+    <div className="card stack">
+      <div className="row"><h3 className="grow">Auto screenshots</h3>
+        <Toggle checked={a.enabled} onChange={(v) => patch.mutate({ auto_capture: { enabled: v } })} label={a.enabled ? "On" : "Off"} /></div>
+      <p className="text-2 small">
+        A small local model reads the live transcript and decides when something is worth a screenshot, such as a bug, a glitch or “look at this”.
+        It only decides capture or skip; it never writes text. The last {a.buffer_seconds} s of your screen is kept in memory only, so the screenshot shows the moment the words were said.
+        Only frames it picks are saved, as markers like F8.
+      </p>
+      <Banner kind="info"><p>Needs <b>live</b> transcription: choose “Live” when starting a session (or set it as the default in Transcription).</p></Banner>
+      {a.enabled && w?.state === "needs_live" && <Banner kind="warn"><p>This session isn't transcribing live, so auto screenshots are paused.</p></Banner>}
+      {a.enabled && w?.state === "watching" && <p className="small"><span className="dot ok" /> Watching this session · {w.count} auto screenshot(s)</p>}
+      {w?.error && a.enabled && <p className="small" style={{ color: "var(--warn)" }}>{w.error}</p>}
+      <div className="grid-2">
+        <div className="field"><label htmlFor="acmodel">Decision model</label>
+          <div className="row">
+            <input id="acmodel" className="input mono" list="installed-models" value={model} onChange={(e) => setModel(e.target.value)} />
+            <button className="btn" onClick={() => patch.mutate({ auto_capture: { model } })}>Use</button>
+          </div>
+          <span className="hint">Small and fast is best here. qwen3:1.7b (~1.4 GB) decides in well under a second on most PCs.</span></div>
+        <div className="field"><label htmlFor="accool">Minimum gap between auto screenshots (s)</label>
+          <input id="accool" type="number" min={0} className="input" defaultValue={a.cooldown_s} onBlur={(e) => patch.mutate({ auto_capture: { cooldown_s: Math.max(0, Number(e.target.value) || 0) } })} /></div>
+      </div>
+      {installed && (
+        <div className="row">
+          {has ? <span className="badge success">{a.model} installed</span> : (
+            <button className="btn sm" onClick={() => onPull(a.model)} disabled={p?.state === "pulling"}><Download size={14} /> Download {a.model} with Ollama</button>
+          )}
+          {p?.state === "pulling" && <span className="small muted">{p.status}</span>}
+          {p?.state === "failed" && <span className="small" style={{ color: "var(--danger)" }}>{p.error}</span>}
+        </div>
+      )}
     </div>
   );
 }

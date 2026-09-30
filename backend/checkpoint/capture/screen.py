@@ -102,13 +102,16 @@ def resolve_region(target: str, region_mode: str, fg: Optional[win32.ForegroundI
     return region, monitor
 
 
-def grab(target: str = "foreground", region_mode: str = "foreground_monitor") -> Grab:
+def _grab_image(target: str, region_mode: str):  # noqa: ANN202
     from PIL import Image
 
     fg = win32.foreground_info()
     region, monitor = resolve_region(target, region_mode, fg)
     shot = _mss().grab(region)
-    img = Image.frombytes("RGB", shot.size, shot.rgb)
+    return Image.frombytes("RGB", shot.size, shot.rgb), fg, region, monitor
+
+
+def _to_grab(img, fg, region: dict, monitor: dict) -> Grab:  # noqa: ANN001
     buf = io.BytesIO()
     img.save(buf, format="PNG", compress_level=1)
     thumb = img.copy()
@@ -140,6 +143,34 @@ def grab(target: str = "foreground", region_mode: str = "foreground_monitor") ->
         looks_blank=looks_blank,
         warnings=warnings,
     )
+
+
+def grab(target: str = "foreground", region_mode: str = "foreground_monitor") -> Grab:
+    return _to_grab(*_grab_image(target, region_mode))
+
+
+@dataclass
+class Frame:
+    """A cheap in-memory grab for the auto-capture buffer: JPEG only, turned into a full Grab if kept."""
+
+    mono: float
+    jpeg: bytes
+    fg: Optional[win32.ForegroundInfo]
+    region: dict
+    monitor: dict
+
+
+def grab_frame(mono: float, target: str = "foreground", region_mode: str = "foreground_monitor") -> Frame:
+    img, fg, region, monitor = _grab_image(target, region_mode)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=88)
+    return Frame(mono=mono, jpeg=buf.getvalue(), fg=fg, region=region, monitor=monitor)
+
+
+def frame_to_grab(f: Frame) -> Grab:
+    from PIL import Image
+
+    return _to_grab(Image.open(io.BytesIO(f.jpeg)).convert("RGB"), f.fg, f.region, f.monitor)
 
 
 def foreground_monitor_id() -> Optional[str]:
