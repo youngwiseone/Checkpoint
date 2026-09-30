@@ -48,6 +48,19 @@ and never uploads anything.
 
 Try it with **Projects & sessions → Load demo project** (clearly labelled synthetic data).
 
+## Sending items to an AI assistant
+
+Select items in **Project items** (or open one) and press **Send to AI**:
+
+- **Claude Desktop / Codex** — connect them once in **Settings → AI assistants** (then restart that app).
+  *Send to AI* copies a short prompt such as “use get_handoff with H-3”; paste it into the chat and the
+  assistant fetches the items, verbatim notes and screenshots itself through the read-only Checkpoint
+  connector (MCP). You can also just ask it to “list my open Checkpoint bugs”.
+- **Any other AI** — *Copy as text* puts the items on the clipboard; *Open screenshots folder* gives you the
+  images to drag in. Project items → Export also produces a Markdown/JSON/ZIP bundle.
+
+Checkpoint never uploads anything itself, and audio or full transcripts are never included.
+
 ## Optional features
 
 - **Transcription** — Settings → Transcription → Download `base.en` (~145 MB, one-time). Runs on CPU (int8);

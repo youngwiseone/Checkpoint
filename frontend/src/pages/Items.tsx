@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Search, Share2, RefreshCw, Plus, X, Image as ImageIcon, CloudOff, RotateCw } from "lucide-react";
+import { Download, Search, Share2, RefreshCw, Plus, X, Image as ImageIcon, CloudOff, RotateCw, Bot } from "lucide-react";
+import SendToAIModal from "../components/SendToAI";
 import { api, download, qs } from "../api";
 import type { ItemType, SessionSummary, WorkItem, WorkStatus } from "../types";
 import {
@@ -40,6 +41,7 @@ function ItemDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   type F = { type: ItemType; title: string; description: string; work_status: WorkStatus; assignee: string; priority: string; tags: string };
   const [form, setForm] = useState<F | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [sendAI, setSendAI] = useState(false);
   useEffect(() => {
     const d = q.data;
     if (d && (!form || saver.state === "idle" || saver.state === "saved"))
@@ -74,6 +76,7 @@ function ItemDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               <select className="select" style={{ width: 160 }} value={form.type} onChange={(e) => change({ type: e.target.value as ItemType })} aria-label="Type">{TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select>
               <select className="select" style={{ width: 160 }} value={form.work_status} onChange={(e) => change({ work_status: e.target.value as WorkStatus })} aria-label="Work status">{WORK_STATUSES.map((s) => <option key={s} value={s}>{WORK_LABEL[s]}</option>)}</select>
               <span className="spacer" />
+              <button className="btn sm" onClick={() => setSendAI(true)}><Bot size={14} /> Send to AI</button>
               <ShareBadge state={d.sharing_state} error={d.sync_error} />
             </div>
             {d.sync_error && d.sharing_state !== "synced" && <p className="small" style={{ color: d.sharing_state === "failed" ? "var(--danger)" : "var(--text-2)" }}>{d.sync_error}</p>}
@@ -113,6 +116,7 @@ function ItemDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         )}
       </div>
       {zoom && <Lightbox src={zoom} onClose={() => setZoom(null)} />}
+      {sendAI && <SendToAIModal ids={[id]} onClose={() => setSendAI(false)} />}
     </div>
   );
 }
@@ -213,7 +217,7 @@ export default function Items() {
   const [sessionId, setSessionId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);
-  const [modal, setModal] = useState<"publish" | "export" | "new" | null>(null);
+  const [modal, setModal] = useState<"publish" | "export" | "new" | "ai" | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
   const items = useQuery({
@@ -289,8 +293,9 @@ export default function Items() {
       {selected.size > 0 && (
         <div className="row" style={{ marginBottom: 10 }}>
           <b>{selected.size} selected</b>
+          <button className="btn sm primary" onClick={() => setModal("ai")}><Bot size={14} /> Send to AI…</button>
           <button className="btn sm" onClick={() => setModal("export")}><Download size={14} /> Export…</button>
-          {project?.shared_project_id && <button className="btn sm primary" onClick={() => setModal("publish")}><Share2 size={14} /> Publish…</button>}
+          {project?.shared_project_id && <button className="btn sm" onClick={() => setModal("publish")}><Share2 size={14} /> Publish…</button>}
           <button className="btn sm ghost" onClick={() => setSelected(new Set())}>Clear</button>
         </div>
       )}
@@ -334,6 +339,7 @@ export default function Items() {
       {modal === "publish" && <PublishModal ids={[...selected]} onClose={() => setModal(null)} />}
       {modal === "export" && <ExportModal ids={[...selected]} onClose={() => setModal(null)} />}
       {modal === "new" && <NewItemModal projectId={projectId} onClose={() => setModal(null)} />}
+      {modal === "ai" && <SendToAIModal ids={[...selected]} onClose={() => setModal(null)} />}
     </div>
   );
 }

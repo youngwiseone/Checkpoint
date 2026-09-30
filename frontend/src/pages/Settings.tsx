@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import type { Integration } from "../components/SendToAI";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, KeyRound, Link2, Unlink, Save, ShieldCheck } from "lucide-react";
+import { Bot, Download, KeyRound, Link2, Unlink, Save, ShieldCheck } from "lucide-react";
 import { api } from "../api";
 import type { HotkeyBinding, Project, Settings } from "../types";
 import { Banner, Spinner, Toggle, fmtBytes, useToast } from "../components/ui";
 import { useAppState, useProjects } from "../state";
 import { ReadinessList } from "./Welcome";
 
-type Tab = "general" | "shortcuts" | "transcription" | "ai" | "sharing" | "storage";
+type Tab = "general" | "shortcuts" | "transcription" | "ai" | "assistants" | "sharing" | "storage";
 
 function useSettings() {
   return useQuery({ queryKey: ["settings"], queryFn: () => api.get<Settings>("/api/settings") });
@@ -72,6 +74,8 @@ function Shortcuts({ s }: { s: Settings }) {
 
 function Transcription({ s }: { s: Settings }) {
   const patch = usePatch();
+  const { data: appState } = useAppState();
+  const tw = appState?.workers.transcription;
   const qc = useQueryClient();
   const toast = useToast();
   type M = { models: { name: string; approx_mb: number; note: string; installed: boolean }[]; downloads: Record<string, { state: string; bytes_done: number; bytes_total: number; error: string | null }>; selected: string };
@@ -113,6 +117,7 @@ function Transcription({ s }: { s: Settings }) {
               <option value="after">After session (recommended)</option><option value="live">Live</option>
             </select></div>
         </div>
+        {t.device === "cuda" && tw?.gpu_fallback && <Banner kind="warn"><p>{tw.gpu_fallback}</p><p className="small">GPU transcription needs NVIDIA's CUDA 12 and cuDNN 9 runtime libraries. The CPU works fine for the base model.</p></Banner>}
         <Toggle checked={!t.paused} onChange={(v) => patch.mutate({ transcription: { paused: !v } })} label="Background transcription" hint="Pause to free up the CPU; recording continues and the backlog resumes later." />
         <p className="hint">Transcription and AI organisation run one at a time so they don't compete for memory.</p>
       </div>
@@ -289,11 +294,59 @@ function Storage({ s }: { s: Settings }) {
   );
 }
 
+function Assistants() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ["integrations"], queryFn: () => api.get<Integration[]>("/api/integrations") });
+  const recent = useQuery({ queryKey: ["handoffs"], queryFn: () => api.get<{ code: string; title: string; created_at: string; items: number }[]>("/api/handoffs") });
+  const set = useMutation({
+    mutationFn: ({ app, connect }: { app: string; connect: boolean }) => api.post<Integration>(`/api/integrations/${app}/${connect ? "connect" : "disconnect"}`),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["integrations"] });
+      toast("success", r.connected ? `Connected. Fully quit and reopen ${r.name} to finish (tray icon > Quit).` : `Disconnected from ${r.name}. Restart it to apply.`);
+    },
+    onError: (e: Error) => toast("error", e.message),
+  });
+  return (
+    <div className="stack-lg">
+      <div className="card stack">
+        <h3>AI assistants</h3>
+        <p className="text-2 small">
+          Connect Claude Desktop or Codex once. Then use <b>Send to AI</b> in Project items: it copies a short prompt, and the assistant
+          fetches the items, notes and screenshots from Checkpoint on this PC. The connector is read-only, makes no network requests and
+          never exposes audio or full transcripts. You can also ask the assistant things like “list my open Checkpoint bugs”.
+        </p>
+        {!q.data ? <Spinner /> : q.data.map((i) => (
+          <div key={i.app} className="row" style={{ padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+            <Bot size={18} className="muted" />
+            <div className="grow">
+              <b>{i.name}</b>
+              <div className="small muted truncate" title={i.config}>{i.installed ? i.config : "Not found on this PC"}</div>
+            </div>
+            {i.connected ? <span className="badge success">Connected</span> : <span className="badge neutral">Not connected</span>}
+            {i.connected
+              ? <button className="btn sm" onClick={() => set.mutate({ app: i.app, connect: false })} disabled={set.isPending}>Disconnect</button>
+              : <button className="btn sm primary" onClick={() => set.mutate({ app: i.app, connect: true })} disabled={set.isPending || !i.installed}>Connect</button>}
+          </div>
+        ))}
+        <p className="hint">Connecting adds a “checkpoint” entry to that app's MCP settings and keeps a backup of the file next to it. Restart the app afterwards.</p>
+      </div>
+      {!!recent.data?.length && (
+        <div className="card stack">
+          <h3>Recent handoffs</h3>
+          {recent.data.map((h) => <div key={h.code} className="row small"><b className="mono">{h.code}</b><span className="grow">{h.title}</span><span className="muted">{new Date(h.created_at).toLocaleString()}</span></div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>("general");
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) || "general");
   const s = useSettings();
   useEffect(() => { document.title = "Settings · Checkpoint"; return () => { document.title = "Checkpoint"; }; }, []);
-  const tabs: [Tab, string][] = [["general", "General"], ["shortcuts", "Shortcuts & capture"], ["transcription", "Transcription"], ["ai", "Local AI"], ["sharing", "Sharing"], ["storage", "Storage"]];
+  const tabs: [Tab, string][] = [["general", "General"], ["shortcuts", "Shortcuts & capture"], ["transcription", "Transcription"], ["ai", "Local AI"], ["assistants", "AI assistants"], ["sharing", "Sharing"], ["storage", "Storage"]];
   return (
     <div className="page">
       <div className="page-head"><div className="grow"><h1>Settings</h1><p>Optional features have clear setup steps; none of them are required to capture.</p></div></div>
@@ -304,6 +357,7 @@ export default function SettingsPage() {
           {tab === "shortcuts" && <Shortcuts s={s.data} />}
           {tab === "transcription" && <Transcription s={s.data} />}
           {tab === "ai" && <LocalAI s={s.data} />}
+          {tab === "assistants" && <Assistants />}
           {tab === "sharing" && <Sharing s={s.data} />}
           {tab === "storage" && <Storage s={s.data} />}
         </>

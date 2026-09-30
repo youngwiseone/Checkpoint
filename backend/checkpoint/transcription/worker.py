@@ -50,6 +50,8 @@ class TranscriptionWorker(Worker):
         super().__init__()
         self.engine = WhisperEngine()
         self.current_job: Optional[str] = None
+        self.job_started: Optional[float] = None
+        self.job_audio_s: float = 0.0
         self.model_error: Optional[str] = None
         self._missing_model_notified = False
 
@@ -100,8 +102,12 @@ class TranscriptionWorker(Worker):
         return True
 
     def _run_job(self, job_id: str, chunk_id: str, st) -> None:  # noqa: ANN001
+        import time as _time
+
         self.busy = True
         self.current_job = job_id
+        self.job_started = _time.monotonic()
+        self.job_audio_s = 0.0
         try:
             with write_session() as s:
                 job = s.get(TranscriptionJob, job_id)
@@ -121,6 +127,7 @@ class TranscriptionWorker(Worker):
                     ).first()
                 glossary = (project.glossary or "").strip()
             audio = load_chunk_audio(chunk)
+            self.job_audio_s = len(audio) / 16000
             overlap = 0.0
             if prev is not None and prev.state in ("complete", "recovered"):
                 try:
@@ -173,6 +180,21 @@ class TranscriptionWorker(Worker):
         finally:
             self.busy = False
             self.current_job = None
+            self.job_started = None
+
+
+def stalled_message(w: "TranscriptionWorker") -> Optional[str]:
+    """A job taking far longer than its audio is reported instead of showing 'working...' forever."""
+    import time as _time
+
+    if not w.busy or w.job_started is None:
+        return None
+    elapsed = _time.monotonic() - w.job_started
+    limit = max(180.0, w.job_audio_s * 15)
+    if elapsed > limit:
+        return (f"Transcription seems stuck: one audio block has been processing for {int(elapsed // 60)} min. "
+                "Your audio is safe. Quit and restart Checkpoint to retry; if it keeps happening, set Transcription > Device to CPU.")
+    return None
 
 
 def transcription_status(session_id: Optional[str] = None) -> dict:

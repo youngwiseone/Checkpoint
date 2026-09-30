@@ -1206,3 +1206,73 @@ def share_attachment(aid: str) -> Response:
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Couldn't fetch attachment: {e.__class__.__name__}") from e
     return Response(data, media_type=ctype, headers={"Cache-Control": "private, max-age=86400"})
+
+
+# ================================================================== AI assistants (handoffs + connector)
+class HandoffIn(BaseModel):
+    ids: list[str]
+    include_screenshots: bool = True
+    include_excerpts: bool = True
+    instruction: str = Field(default="", max_length=4000)
+    mode: str = "implement_commit"
+
+
+@router.post("/handoffs")
+def create_handoff(body: HandoffIn) -> dict:
+    from ..services import handoff as ho
+
+    try:
+        return ho.create(body.ids, body.include_screenshots, body.include_excerpts, body.instruction, body.mode)
+    except ValueError as e:
+        raise _bad(e) from e
+
+
+@router.get("/handoffs")
+def recent_handoffs() -> list[dict]:
+    from ..services import handoff as ho
+
+    return ho.list_recent()
+
+
+@router.post("/ai-copy")
+def ai_copy(body: HandoffIn) -> dict:
+    """Plain text for pasting into any assistant (screenshots go via the folder)."""
+    from ..services import handoff as ho
+
+    try:
+        b = ho.build(body.ids, False, body.include_excerpts, instruction=ho.task_text(body.mode, body.instruction, ho.item_types(body.ids)))
+    except ValueError as e:
+        raise _bad(e) from e
+    return {"markdown": b.markdown}
+
+
+@router.post("/ai-copy/folder")
+def ai_copy_folder(body: HandoffIn) -> dict:
+    from ..services import handoff as ho
+
+    try:
+        folder = ho.write_folder(body.ids, body.include_screenshots, body.include_excerpts)
+    except ValueError as e:
+        raise _bad(e) from e
+    return {"folder": str(folder)}
+
+
+@router.get("/integrations")
+def integrations_status() -> list[dict]:
+    from .. import integrations
+
+    return integrations.status()
+
+
+@router.post("/integrations/{app}/{action}")
+def integrations_set(app: str, action: str) -> dict:
+    from .. import integrations
+
+    if action not in ("connect", "disconnect"):
+        raise HTTPException(404, "Unknown action")
+    try:
+        return integrations.set_connected(app, action == "connect")
+    except integrations.IntegrationError as e:
+        raise _bad(e) from e
+    except OSError as e:
+        raise HTTPException(500, f"Couldn't update the config file: {e}") from e

@@ -104,14 +104,78 @@ HALLUCINATIONS = re.compile(
 )
 
 
+CUDA_DLLS = ("cublas64_12.dll", "cublasLt64_12.dll", "cudnn_ops64_9.dll")
+_cuda_check: Optional[tuple[bool, str]] = None
+
+
+def _add_pip_cuda_dirs() -> None:
+    """Make NVIDIA runtime wheels (nvidia-cublas-cu12, nvidia-cudnn-cu12) loadable if installed."""
+    import site
+    import sys
+
+    if sys.platform != "win32":
+        return
+    for base in site.getsitepackages():
+        root = Path(base) / "nvidia"
+        if root.is_dir():
+            for bin_dir in root.glob("*/bin"):
+                try:
+                    os.add_dll_directory(str(bin_dir))
+                    os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+                except OSError:
+                    pass
+
+
+def cuda_available() -> tuple[bool, str]:
+    """(usable, reason). Checked once: a GPU plus the CUDA 12 / cuDNN 9 runtime libraries."""
+    global _cuda_check
+    if _cuda_check is not None:
+        return _cuda_check
+    try:
+        import ctranslate2
+
+        if ctranslate2.get_cuda_device_count() < 1:
+            _cuda_check = (False, "no CUDA-capable NVIDIA GPU was found")
+            return _cuda_check
+    except Exception as e:  # noqa: BLE001
+        _cuda_check = (False, f"the CUDA check failed ({e})")
+        return _cuda_check
+    import sys
+
+    if sys.platform == "win32":
+        import ctypes
+
+        _add_pip_cuda_dirs()
+        missing = []
+        for dll in CUDA_DLLS:
+            try:
+                ctypes.WinDLL(dll)
+            except OSError:
+                missing.append(dll)
+        if missing:
+            _cuda_check = (False, "the NVIDIA CUDA 12 / cuDNN 9 runtime libraries are not installed (missing " + ", ".join(missing) + ")")
+            return _cuda_check
+    _cuda_check = (True, "")
+    return _cuda_check
+
+
+def _is_gpu_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(k in msg for k in ("cuda", "cublas", "cudnn", "gpu", "out of memory"))
+
+
 class WhisperEngine:
     def __init__(self) -> None:
         self._model = None
         self._key: Optional[tuple] = None
         self.fallback_message: Optional[str] = None
+        self.gpu_failed = False  # a GPU error during this run: stay on CPU until restart
+        self.device = "cpu"
+        self._load_args: Optional[tuple] = None
 
     def ensure(self, name: str, device: str, compute_type: str, cpu_threads: int) -> None:
-        key = (name, device, compute_type, cpu_threads)
+        key = (name, device, compute_type, cpu_threads, self.gpu_failed)
+        self._load_args = (name, device, compute_type, cpu_threads)
         if self._model is not None and self._key == key:
             return
         if not model_installed(name):
@@ -120,6 +184,15 @@ class WhisperEngine:
 
         self._model = None
         path = str(model_dir(name))
+        if device == "cuda" and self.gpu_failed:
+            device = "cpu"
+        if device == "cuda":
+            ok, why = cuda_available()
+            if not ok:
+                device = "cpu"
+                self.fallback_message = f"GPU transcription is not available: {why}. Using the CPU instead."
+                log.warning(self.fallback_message)
+        self.device = device
         if device == "cuda":
             try:
                 self._model = WhisperModel(path, device="cuda", compute_type="float16" if compute_type == "int8" else compute_type,
@@ -129,6 +202,7 @@ class WhisperEngine:
                 self.fallback_message = f"GPU transcription unavailable ({str(e)[:160]}). Using CPU instead."
                 log.warning(self.fallback_message)
         if self._model is None:
+            self.device = "cpu"
             self._model = WhisperModel(path, device="cpu", compute_type="int8", cpu_threads=cpu_threads, local_files_only=True)
         self._key = key
 
@@ -137,6 +211,20 @@ class WhisperEngine:
         self._key = None
 
     def transcribe(self, audio, *, english_only: bool, initial_prompt: Optional[str]) -> list[dict]:  # noqa: ANN001
+        try:
+            return self._transcribe(audio, english_only=english_only, initial_prompt=initial_prompt)
+        except Exception as e:  # noqa: BLE001
+            if self.device != "cuda" or not _is_gpu_error(e) or self._load_args is None:
+                raise
+            self.gpu_failed = True
+            self.fallback_message = f"GPU transcription failed ({str(e)[:160]}). Switched to the CPU."
+            log.warning(self.fallback_message)
+            self.unload()
+            name, _device, compute_type, cpu_threads = self._load_args
+            self.ensure(name, "cpu", compute_type, cpu_threads)
+            return self._transcribe(audio, english_only=english_only, initial_prompt=initial_prompt)
+
+    def _transcribe(self, audio, *, english_only: bool, initial_prompt: Optional[str]) -> list[dict]:  # noqa: ANN001
         assert self._model is not None
         segments, _info = self._model.transcribe(
             audio,
