@@ -202,8 +202,8 @@ function AutoCapture({ s, installed, onPull, pulls }: { s: Settings; installed: 
       <div className="row"><h3 className="grow">Auto screenshots</h3>
         <Toggle checked={a.enabled} onChange={(v) => patch.mutate({ auto_capture: { enabled: v } })} label={a.enabled ? "On" : "Off"} /></div>
       <p className="text-2 small">
-        A small local model reads the live transcript and decides when something is worth a screenshot, such as a bug, a glitch or “look at this”.
-        It only decides capture or skip; it never writes text. The last {a.buffer_seconds} s of your screen is kept in memory only, so the screenshot shows the moment the words were said.
+        A small local decision model (Jev-style, through Ollama) reads each live transcript line and gives the chance that you're pointing out a bug, glitch or problem on screen.
+        It only decides; it never writes text. The last {a.buffer_seconds} s of your screen is kept in memory only, so the screenshot shows the moment the words were said.
         Only frames it picks are saved, as markers like F8.
       </p>
       <Banner kind="info"><p>Needs <b>live</b> transcription: choose “Live” when starting a session (or set it as the default in Transcription).</p></Banner>
@@ -216,7 +216,10 @@ function AutoCapture({ s, installed, onPull, pulls }: { s: Settings; installed: 
             <input id="acmodel" className="input mono" list="installed-models" value={model} onChange={(e) => setModel(e.target.value)} />
             <button className="btn" onClick={() => patch.mutate({ auto_capture: { model } })}>Use</button>
           </div>
-          <span className="hint">Small and fast is best here. qwen3:1.7b (~1.4 GB) decides in well under a second on most PCs.</span></div>
+          <span className="hint">Needs a System One model (Nimble or Tev). tev1:0.8b (~900 MB) decides in under 0.1 s once loaded.</span></div>
+        <div className="field"><label htmlFor="acthr">Sensitivity</label>
+          <input id="acthr" type="number" min={0.05} max={0.95} step={0.05} className="input" defaultValue={a.threshold} onBlur={(e) => patch.mutate({ auto_capture: { threshold: Math.max(0.05, Math.min(0.95, Number(e.target.value) || 0.5)) } })} />
+          <span className="hint">Take a screenshot when the model is at least this sure (0–1). Lower catches more.</span></div>
         <div className="field"><label htmlFor="accool">Minimum gap between auto screenshots (s)</label>
           <input id="accool" type="number" min={0} className="input" defaultValue={a.cooldown_s} onBlur={(e) => patch.mutate({ auto_capture: { cooldown_s: Math.max(0, Number(e.target.value) || 0) } })} /></div>
       </div>

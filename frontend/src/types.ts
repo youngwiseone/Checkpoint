@@ -291,7 +291,7 @@ export interface Settings {
   };
   transcription: { model: string; device: "cpu" | "cuda"; compute_type: string; default_mode: "after" | "live" | "off"; paused: boolean; cpu_threads: number; overlap_seconds: number };
   ai: { enabled: boolean; base_url: string; model: string; timeout_seconds: number; max_retries: number; chunk_chars: number; chunk_overlap_items: number; window_before_s: number; window_after_s: number };
-  auto_capture: { enabled: boolean; model: string; frame_interval_s: number; buffer_seconds: number; cooldown_s: number; max_per_session: number };
+  auto_capture: { enabled: boolean; model: string; threshold: number; frame_interval_s: number; buffer_seconds: number; cooldown_s: number; max_per_session: number };
   sharing: { server_url: string; display_name: string; allow_insecure_private_network: boolean };
   last_project_id: string | null;
   data_dir: string;

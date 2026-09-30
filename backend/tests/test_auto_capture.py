@@ -76,21 +76,21 @@ def test_picks_frame_from_when_words_were_said(app_env, monkeypatch):
     _segment(sid, src_id, at(30), "ok heading to the next level now")
     _segment(sid, src_id, at(10), "bug again, the score reset")
     asked = []
-    w.decide = lambda text, before: asked.append(text) or "bug" in text
+    w.decide = lambda text: asked.append(text) or "bug" in text
     w.step()
     caps = _auto_caps(sid)
     assert [st for _, st in caps] == ["marker", "marker"]
     assert abs(caps[0][0] - at(60)) <= 1100 and abs(caps[1][0] - at(10)) <= 1100
-    assert len(asked) == 4 and w.count == 2
+    assert asked[0] == "warm up" and len(asked) == 5 and w.count == 2
     w.step()  # already-decided lines are never asked about or captured twice
-    assert len(asked) == 4 and len(_auto_caps(sid)) == 2
+    assert len(asked) == 5 and len(_auto_caps(sid)) == 2
     sm.end()
 
 
 def test_waits_for_live_transcription(app_env, monkeypatch):
     sm, w, sid, src_id, now = _setup(monkeypatch, mode="after")
     _segment(sid, src_id, sm.active.clock.offset_ms(now - 5), "that's a bug")
-    w.decide = lambda text, before: True
+    w.decide = lambda text: True
     w.step()
     assert w.state == "needs_live" and _auto_caps(sid) == []
     sm.end()
@@ -108,3 +108,36 @@ def test_frame_buffer_drops_old_frames(app_env):
     assert fb.oldest() == 68.0
     assert fb.nearest(80.9, 3).mono == 80.0
     assert fb.nearest(10.0, 3) is None
+
+
+def test_decision_uses_systemone_noul(app_env):
+    import json
+
+    import httpx
+    import pytest
+
+    from checkpoint.capture.auto import AutoCaptureWorker
+    from checkpoint.extraction.ollama import ProviderError
+    from checkpoint.settings_store import update_settings
+
+    sent = []
+
+    def handler(req):
+        body = json.loads(req.content)
+        sent.append((req.url.path, body))
+        if body["model"] == "missing":
+            return httpx.Response(404, json={"error": 'model "missing" not found, try pulling it first'})
+        p = 0.81 if "bug" in body["state"]["transcript_line"] else 0.3
+        return httpx.Response(200, json={"answers": {"q": {"type": "noul", "noul": p}}})
+
+    w = AutoCaptureWorker(None, None)
+    prov = w._decider("http://127.0.0.1:11434")
+    prov._client = httpx.Client(base_url=prov.base_url, transport=httpx.MockTransport(handler))
+    assert w.decide("that's a bug") is True and w.decide("nice jump") is False
+    assert sent[0][0] == "/v1/systemone" and sent[0][1]["model"] == "tev1:0.8b"
+    assert sent[0][1]["questions"]["q"]["type"] == "noul"
+    update_settings({"auto_capture": {"threshold": 0.9}})
+    assert w.decide("that's a bug") is False
+    update_settings({"auto_capture": {"model": "missing"}})
+    with pytest.raises(ProviderError, match="ollama pull missing"):
+        w.decide("that's a bug")

@@ -183,6 +183,32 @@ class OllamaProvider:
         raise last_err or ProviderError("The model request failed")
 
 
+    # ------------------------------------------------------------------ decisions
+    def noul(self, model: str, state: dict, instructions: str) -> float:
+        """Probability that a yes/no statement is true, from a System One (Jev-style) decision model."""
+        body = {"model": model, "state": state, "questions": {"q": {"type": "noul", "instructions": instructions}}}
+        try:
+            r = self._c().post("/v1/systemone", json=body)
+        except httpx.TimeoutException as e:
+            raise ProviderError(f"The decision model timed out after {self.timeout:.0f}s.") from e
+        except (httpx.TransportError, RuntimeError) as e:
+            raise ProviderError(f"Couldn't reach Ollama at {self.base_url}: {e.__class__.__name__}") from e
+        if r.status_code >= 400:
+            try:
+                msg = str(r.json().get("error") or r.text)
+            except ValueError:
+                msg = r.text
+            if "not found" in msg and "model" in msg:
+                msg = f"Model “{model}” isn't installed in Ollama. Download it in Settings → Local AI, or run: ollama pull {model}"
+            elif r.status_code == 404:
+                msg = f"Ollama at {self.base_url} has no decision-model support. Update Ollama to 0.35 or newer."
+            raise ProviderError(msg[:300])
+        try:
+            return float(r.json()["answers"]["q"]["noul"])
+        except (KeyError, ValueError, TypeError) as e:
+            raise ProviderError("The decision model returned an unexpected response.") from e
+
+
 class PullManager:
     """Explicit `ollama pull` with progress, started only by the user."""
 

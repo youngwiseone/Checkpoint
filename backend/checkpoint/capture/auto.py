@@ -6,7 +6,8 @@ buffer grabs the screen every couple of seconds and keeps the last ~90 s in memo
 only; when the model picks a transcript line, the frame from when it was said is saved
 as an ordinary audio marker. Frames that aren't picked never touch the disk.
 
-The model only makes a decision (capture or skip); it never writes text.
+The decision comes from a System One (Jev-style) model through Ollama's /v1/systemone
+endpoint: it returns the probability that a screenshot is worth taking and never writes text.
 """
 
 from __future__ import annotations
@@ -15,9 +16,8 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import Literal, Optional
+from typing import Optional
 
-from pydantic import BaseModel
 from sqlalchemy import select
 
 from ..db import read_session
@@ -28,16 +28,8 @@ from ..workers import HEAVY_LOCK, Worker
 
 log = logging.getLogger(__name__)
 
-SYSTEM = (
-    "You watch the live transcript of someone playtesting a game or reviewing software. Decide whether what was just said "
-    "is worth a screenshot of their screen right now. Choose capture for: a bug, glitch, crash, something broken, wrong or "
-    "confusing; a surprising or notable moment on screen; or the speaker asking to look at, note or remember something. "
-    "Choose skip for small talk, planning, narration of routine play, or anything not about what is on screen."
-)
-
-
-class Decision(BaseModel):
-    decision: Literal["capture", "skip"]
+# Short and specific works best for the small decision models (tev1:0.8b scored 10/10 on a sample set with this).
+QUESTION = "Is the speaker pointing out a bug, glitch or problem they can see on screen?"
 
 
 class FrameBuffer:
@@ -122,14 +114,13 @@ class AutoCaptureWorker(Worker):
         from ..extraction.ollama import OllamaProvider
 
         if self._provider is None or self._provider.base_url != base_url.rstrip("/"):
-            self._provider = OllamaProvider(base_url, timeout=30, max_retries=1)
+            self._provider = OllamaProvider(base_url, timeout=120, max_retries=1)  # first call loads the model
         return self._provider
 
-    def decide(self, text: str, before: str) -> bool:
+    def decide(self, text: str) -> bool:
         st = get_settings()
-        user = (f"Said just before: {before}\n" if before else "") + f"Just said: {text}"
-        d = self._decider(st.ai.base_url).chat_json(st.auto_capture.model, SYSTEM, user, Decision, num_ctx=1024)
-        return d.decision == "capture"
+        p = self._decider(st.ai.base_url).noul(st.auto_capture.model, {"transcript_line": text}, QUESTION)
+        return p >= st.auto_capture.threshold
 
     def _idle(self, state: str) -> bool:
         if self.frames.running:
@@ -151,6 +142,11 @@ class AutoCaptureWorker(Worker):
             from ..extraction.ollama import ensure_running
 
             ensure_running(st.ai.base_url)
+            self.frames.start(a.capture_target)
+            try:  # loading the model takes ~30 s the first time; do it before the first transcript arrives
+                self.decide("warm up")
+            except Exception:  # noqa: BLE001 - reported when a real line is decided
+                pass
         self.state = "watching"
         self.frames.start(a.capture_target)
         oldest = self.frames.oldest()
@@ -163,15 +159,13 @@ class AutoCaptureWorker(Worker):
                 .order_by(TranscriptSegment.start_ms)
             ).all()
             rows = [(g.id, g.start_ms, (g.corrected_text or g.text).strip()) for g in segs]
-        before = ""
         for seg_id, start_ms, text in rows:
             if seg_id in self.seen:
-                before = text
                 continue
             if not HEAVY_LOCK.acquire(timeout=10):
                 return False  # transcription is busy; try again on the next step
             try:
-                pick = bool(text) and self.decide(text, before)
+                pick = bool(text) and self.decide(text)
                 self.model_error = None
             except Exception as e:  # noqa: BLE001
                 msg = f"Auto-capture couldn't ask the local model: {e}"
@@ -182,7 +176,6 @@ class AutoCaptureWorker(Worker):
             finally:
                 HEAVY_LOCK.release()
             self.seen.add(seg_id)
-            before = text
             if pick:
                 self._shoot(a, start_ms, st.auto_capture)
         return False

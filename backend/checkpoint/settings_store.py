@@ -59,9 +59,10 @@ class AISettings(BaseModel):
 
 
 class AutoCaptureSettings(BaseModel):
-    # A local model reads the live transcript and decides when a screenshot is worth taking.
+    # A System One (Jev-style) decision model reads the live transcript and decides when a screenshot is worth taking.
     enabled: bool = False
-    model: str = "qwen3:1.7b"
+    model: str = "tev1:0.8b"
+    threshold: float = 0.5  # capture when the model's probability is at least this
     frame_interval_s: float = 2.0
     buffer_seconds: int = 90
     cooldown_s: int = 15
