@@ -126,3 +126,16 @@ def test_crash_recovery_repairs_chunks_and_requeues(app_env):
         assert s.query(SessionPause).filter_by(reason="restart").count() == 1
     data = (paths().audio / ch.rel_path).read_bytes()
     assert struct.unpack("<I", data[40:44])[0] == 32000
+
+
+def test_data_from_newer_version_gives_clear_message(app_env):
+    import pytest
+    from sqlalchemy import text
+
+    from checkpoint import db
+
+    with db.engine().begin() as c:
+        c.execute(text("UPDATE alembic_version SET version_num = '9999'"))
+    db.reset_engine()
+    with pytest.raises(db.DataNewerThanCode, match="newer version of Checkpoint"):
+        db.migrate()

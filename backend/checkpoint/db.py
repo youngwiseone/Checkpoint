@@ -54,6 +54,10 @@ def reset_engine() -> None:
     _Session = None
 
 
+class DataNewerThanCode(RuntimeError):
+    """The database was upgraded by a newer version of Checkpoint than the code that's running."""
+
+
 def migrate() -> None:
     from alembic import command
     from alembic.config import Config
@@ -61,10 +65,22 @@ def migrate() -> None:
     cfg = Config()
     cfg.set_main_option("script_location", str(MIGRATIONS_DIR))
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{paths().db_file.as_posix()}")
+    from alembic.util.exc import CommandError
+
     eng = engine()
-    with eng.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.upgrade(cfg, "head")
+    try:
+        with eng.begin() as conn:
+            cfg.attributes["connection"] = conn
+            command.upgrade(cfg, "head")
+    except CommandError as e:
+        if "Can't locate revision" not in str(e):
+            raise
+        # The data was upgraded by newer code than what's running (e.g. an older branch is checked out).
+        raise DataNewerThanCode(
+            f"Your Checkpoint data ({paths().db_file}) was upgraded by a newer version of Checkpoint than the one "
+            "you're running, so this version can't open it.\n\nUpdate the code to the latest version (for example "
+            "`git pull` on main), then start Checkpoint again. Your data hasn't been changed."
+        ) from None
     log.info("Database migrated: %s", paths().db_file)
 
 

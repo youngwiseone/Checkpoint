@@ -39,7 +39,12 @@ def run() -> int:
         from .desktop.host import main
 
         return main()
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        from .db import DataNewerThanCode
+
+        if isinstance(e, DataNewerThanCode):
+            _fatal(str(e))
+            return 1
         _fatal("Checkpoint hit an error while starting:\n\n" + traceback.format_exc())
         return 1
 
