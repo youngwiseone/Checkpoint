@@ -375,3 +375,18 @@ class SyncJob(Base):
 Index("ix_draft_session_state", DraftItem.session_id, DraftItem.review_state)
 Index("ix_segments_session_time", TranscriptSegment.session_id, TranscriptSegment.start_ms)
 Index("ix_captures_session_time", Capture.session_id, Capture.offset_ms)
+
+
+class Handoff(Base):
+    """A bundle of approved items sent to an AI assistant (fetched through the Checkpoint MCP tool)."""
+
+    __tablename__ = "handoffs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    number: Mapped[int] = mapped_column(Integer, unique=True)  # shown as H-<number>
+    title: Mapped[str] = mapped_column(String(300), default="")
+    item_ids: Mapped[Any] = mapped_column(JSON, default=list)
+    include_screenshots: Mapped[bool] = mapped_column(Boolean, default=True)
+    include_excerpts: Mapped[bool] = mapped_column(Boolean, default=True)
+    instruction: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
