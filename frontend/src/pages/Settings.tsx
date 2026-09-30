@@ -74,6 +74,8 @@ function Transcription({ s }: { s: Settings }) {
   const patch = usePatch();
   const qc = useQueryClient();
   const toast = useToast();
+  const { data: appState } = useAppState();
+  const tw = appState?.workers.transcription;
   type M = { models: { name: string; approx_mb: number; note: string; installed: boolean }[]; downloads: Record<string, { state: string; bytes_done: number; bytes_total: number; error: string | null }>; selected: string };
   const q = useQuery({ queryKey: ["whisper-models"], queryFn: () => api.get<M>("/api/transcription/models"), refetchInterval: (qq) => (Object.values(qq.state.data?.downloads ?? {}).some((d) => d.state === "downloading") ? 800 : 10000) });
   const dl = useMutation({ mutationFn: (name: string) => api.post(`/api/transcription/models/${name}/download`), onSuccess: () => qc.invalidateQueries({ queryKey: ["whisper-models"] }), onError: (e: Error) => toast("error", e.message) });
@@ -115,6 +117,7 @@ function Transcription({ s }: { s: Settings }) {
         </div>
         <Toggle checked={!t.paused} onChange={(v) => patch.mutate({ transcription: { paused: !v } })} label="Background transcription" hint="Pause to free up the CPU; recording continues and the backlog resumes later." />
         <p className="hint">Transcription and AI organisation run one at a time so they don't compete for memory.</p>
+        {t.device === "cuda" && tw?.gpu_fallback && <Banner kind="warn"><p>{tw.gpu_fallback}</p><p className="small">GPU transcription needs NVIDIA's CUDA 12 and cuDNN 9 runtime libraries. The CPU works fine for the base model.</p></Banner>}
       </div>
     </div>
   );

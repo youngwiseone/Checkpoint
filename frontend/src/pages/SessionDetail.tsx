@@ -130,6 +130,8 @@ function SegmentRow({ item, selected, onToggle, sessionEnded }: { item: Timeline
 }
 
 function OrganisePanel({ d, aiEnabled }: { d: SD; aiEnabled: boolean }) {
+  const { data: appState } = useAppState();
+  const tw = appState?.workers.transcription;
   const qc = useQueryClient();
   const toast = useToast();
   const run = d.latest_run;
@@ -159,6 +161,9 @@ function OrganisePanel({ d, aiEnabled }: { d: SD; aiEnabled: boolean }) {
             <span className="small text-2">{total === 0 ? "No audio blocks" : `${t.done} of ${total} audio blocks done`}{t.running ? " · working…" : ""}{t.queued && d.transcription_mode === "off" ? " · not started" : ""}</span>
           </div>
           {total > 0 && <div className="progress" style={{ marginTop: 6 }}><div style={{ width: `${(t.done / Math.max(1, total)) * 100}%` }} /></div>}
+          {tw?.stalled && tw.error && t.running > 0 && <p className="small" style={{ color: "var(--danger)", marginTop: 6 }}>{tw.error}</p>}
+          {tw?.gpu_fallback && total > t.done && <p className="small" style={{ color: "var(--warn)", marginTop: 6 }}>{tw.gpu_fallback}</p>}
+          {!tw?.model_installed && t.queued > 0 && <p className="small" style={{ color: "var(--warn)", marginTop: 6 }}>Model {tw?.model} isn't downloaded yet. Your audio is kept safely; download it in <Link to="/settings">Settings</Link> to transcribe.</p>}
           {t.failed > 0 && <p className="small" style={{ color: "var(--danger)", marginTop: 6 }}>{t.failed} block(s) failed: {d.transcription_errors.join("; ")}</p>}
           {(t.failed > 0 || (d.transcription_mode === "off" && t.queued > 0)) && (
             <button className="btn sm" style={{ marginTop: 8 }} onClick={() => transcribe.mutate()}><RotateCw size={14} /> {t.failed ? "Retry transcription" : "Transcribe now"}</button>

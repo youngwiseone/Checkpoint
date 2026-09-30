@@ -99,13 +99,16 @@ class AppCore:
     def worker_status(self) -> dict:
         from .settings_store import get_settings
         from .transcription.engine import model_installed
+        from .transcription.worker import stalled_message
 
         st = get_settings()
         return {
             "transcription": {
                 "alive": self.transcriber.alive, "busy": self.transcriber.busy, "paused": st.transcription.paused,
                 "model": st.transcription.model, "model_installed": model_installed(st.transcription.model),
-                "error": self.transcriber.model_error or self.transcriber.last_error,
+                "error": stalled_message(self.transcriber) or self.transcriber.model_error or self.transcriber.last_error,
+                "stalled": stalled_message(self.transcriber) is not None,
+                "device": self.transcriber.engine.device,
                 "gpu_fallback": self.transcriber.engine.fallback_message,
             },
             "organiser": {"alive": self.organiser.alive, "busy": self.organiser.busy, "current_run": self.organiser.current_run,

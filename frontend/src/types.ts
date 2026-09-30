@@ -54,7 +54,7 @@ export interface AppState {
   session: ActiveSessionStatus;
   review: { pending: number; approved: number; dismissed: number; unfinished_captures: number };
   workers: {
-    transcription: { alive: boolean; busy: boolean; paused: boolean; model: string; model_installed: boolean; error: string | null; gpu_fallback: string | null };
+    transcription: { alive: boolean; busy: boolean; paused: boolean; model: string; model_installed: boolean; error: string | null; gpu_fallback: string | null; stalled?: boolean; device?: string };
     organiser: { alive: boolean; busy: boolean; current_run: string | null; enabled: boolean; error: string | null };
     sync: { alive: boolean; busy: boolean; offline_reason: string | null; last_ok: string | null; configured: boolean };
   };
