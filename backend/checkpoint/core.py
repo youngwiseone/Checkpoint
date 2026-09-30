@@ -51,7 +51,9 @@ class AppCore:
     def __init__(self) -> None:
         from .capture.auto import AutoCaptureWorker
         from .extraction.worker import ExtractionWorker
+        from .services.agents import AgentWorker
         from .services.appwatch import AppWatcher
+        from .services.preview import PreviewManager
         from .services.capture import CaptureService
         from .services.sessions import SessionManager
         from .sharing.client import SyncWorker
@@ -66,12 +68,15 @@ class AppCore:
         self.sync = SyncWorker()
         self.autocapture = AutoCaptureWorker(self.sessions, self.capture)
         self.appwatch = AppWatcher(self.sessions)
+        self.previews = PreviewManager()
+        self.agents = AgentWorker(self.previews, self.sessions)
         self.sessions.set_chunk_callback(lambda _cid: self.transcriber.wake())
         self.supervisor = None
         self.started = False
 
     def start(self, workers: bool = True) -> None:
         from .extraction.worker import recover_runs
+        from .services.agents import recover_on_launch as recover_agent_runs
         from .services.sessions import stale_recorder_check
         from .transcription.worker import recover_jobs
         from .workers import Supervisor
@@ -81,10 +86,11 @@ class AppCore:
         if n:
             notices.push("info", f"Requeued {n} transcription job(s) that were interrupted.", "recovery")
         recover_runs()
+        recover_agent_runs()
         if workers:
-            for w in (self.transcriber, self.organiser, self.sync, self.autocapture, self.appwatch):
+            for w in self._workers():
                 w.start()
-            self.supervisor = Supervisor([self.transcriber, self.organiser, self.sync, self.autocapture, self.appwatch], [lambda: stale_recorder_check(self.sessions)])
+            self.supervisor = Supervisor(self._workers(), [lambda: stale_recorder_check(self.sessions)])
             self.supervisor.start()
         self.started = True
         log.info("Checkpoint core started; data in %s", paths().root)
@@ -97,9 +103,14 @@ class AppCore:
             log.exception("Error ending session on shutdown")
         if self.supervisor:
             self.supervisor.stop()
-        for w in (self.transcriber, self.organiser, self.sync, self.autocapture, self.appwatch):
+        self.agents.stop_all()
+        for w in self._workers():
             w.stop(timeout=3)
         self.autocapture.frames.stop()
+        self.previews.stop_all()
+
+    def _workers(self) -> list:
+        return [self.transcriber, self.organiser, self.sync, self.autocapture, self.appwatch, self.agents]
 
     def quick_start(self, project_id: Optional[str] = None) -> str:
         """Start a session with the project's remembered setup: the given project, else the one whose
@@ -136,6 +147,7 @@ class AppCore:
                           "enabled": st.ai.enabled, "error": self.organiser.last_error},
             "auto_capture": self.autocapture.status(),
             "app_watch": self.appwatch.status(),
+            "agents": {"alive": self.agents.alive, "error": self.agents.last_error},
             "sync": {"alive": self.sync.alive, "busy": self.sync.busy, "offline_reason": self.sync.offline_reason,
                      "last_ok": self.sync.last_ok, "configured": bool(st.sharing.server_url)},
         }

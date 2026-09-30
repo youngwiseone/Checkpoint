@@ -219,6 +219,14 @@ class ProjectPatch(BaseModel):
     description: Optional[str] = None
     glossary: Optional[str] = None
     archived: Optional[bool] = None
+    repo_path: Optional[str] = Field(default=None, max_length=1000)
+    base_branch: Optional[str] = Field(default=None, max_length=200)
+    default_agent: Optional[str] = None
+    agent_access: Optional[str] = None
+    setup_command: Optional[str] = Field(default=None, max_length=2000)
+    check_command: Optional[str] = Field(default=None, max_length=2000)
+    preview_command: Optional[str] = Field(default=None, max_length=2000)
+    preview_url: Optional[str] = Field(default=None, max_length=500)
 
 
 def project_dict(s, p: Project) -> dict:  # noqa: ANN001
@@ -228,7 +236,11 @@ def project_dict(s, p: Project) -> dict:  # noqa: ANN001
     return {"id": p.id, "name": p.name, "description": p.description, "glossary": p.glossary, "is_demo": p.is_demo,
             "archived": p.archived, "shared_project_id": p.shared_project_id, "shared_project_name": p.shared_project_name,
             "shared_server_url": p.shared_server_url, "last_refreshed_at": _iso(p.last_refreshed_at),
-            "session_count": sessions, "open_items": open_items, "pending_cards": pending, "created_at": _iso(p.created_at)}
+            "session_count": sessions, "open_items": open_items, "pending_cards": pending, "created_at": _iso(p.created_at),
+            "repo_path": p.repo_path, "base_branch": p.base_branch, "default_agent": p.default_agent,
+            "agent_access": p.agent_access, "setup_command": p.setup_command, "check_command": p.check_command,
+            "preview_command": p.preview_command, "preview_url": p.preview_url,
+            "configured": bool(p.repo_path and p.default_agent in ("claude", "codex"))}
 
 
 @router.get("/projects")
@@ -252,8 +264,23 @@ def patch_project(pid: str, body: ProjectPatch) -> dict:
         p = s.get(Project, pid)
         if p is None:
             raise HTTPException(404, "Project not found")
-        for k, v in body.model_dump(exclude_none=True).items():
-            setattr(p, k, v.strip() if isinstance(v, str) else v)
+        patch = body.model_dump(exclude_none=True)
+        if patch.get("default_agent") not in (None, "none", "claude", "codex"):
+            raise HTTPException(400, "Unknown agent")
+        if patch.get("agent_access") not in (None, "standard", "full"):
+            raise HTTPException(400, "Unknown access level")
+        if patch.get("repo_path"):
+            from ..services.workspace import GitError, inspect_repo
+
+            try:
+                patch["repo_path"] = inspect_repo(patch["repo_path"]).root
+            except GitError as e:
+                raise HTTPException(400, str(e)) from e
+            if patch["repo_path"] != p.repo_path and "base_branch" not in patch:
+                patch["base_branch"] = ""  # a branch of the old repo means nothing in the new one
+        for k, v in patch.items():
+            setattr(p, k, (v.strip() or None) if k in ("repo_path", "base_branch") and isinstance(v, str)
+                    else (v.strip() if isinstance(v, str) else v))
         if not p.name:
             raise HTTPException(400, "Name can't be empty")
         s.flush()
@@ -481,8 +508,11 @@ def patch_session(sid: str, body: SessionPatch) -> dict:
         x = s.get(Session, sid)
         if x is None:
             raise HTTPException(404, "Session not found")
-        if body.title is not None and body.title.strip():
+        if body.title is not None and body.title.strip() and body.title.strip() != x.title:
+            if x.name_locked:
+                raise HTTPException(409, f"The name is locked to branch {x.branch} since the first send.")
             x.title = body.title.strip()
+            x.name_edited = True
         if body.purpose is not None:
             x.purpose = body.purpose
     return get_session(sid)
@@ -866,9 +896,20 @@ def create_draft(body: DraftCreate) -> dict:
 @router.post("/drafts/approve")
 def approve(body: IdsIn) -> dict:
     try:
-        return {"approved": rv.approve(body.ids)}
+        out = {"approved": rv.approve(body.ids)}
     except rv.ReviewError as e:
         raise _bad(e) from e
+    _refresh_names(body.ids)
+    return out
+
+
+def _refresh_names(draft_ids: list[str]) -> None:
+    from ..services.agents import refresh_name
+
+    with read_session() as s:
+        sids = {d.session_id for d in (s.get(DraftItem, i) for i in draft_ids) if d is not None}
+    for sid in sids:
+        refresh_name(sid)
 
 
 @router.post("/drafts/merge")
@@ -882,10 +923,10 @@ def merge(body: MergeIn) -> dict:
 @router.post("/drafts/{did}/{action}")
 def draft_action(did: str, action: str) -> dict:
     try:
-        if action == "dismiss":
-            return rv.dismiss(did)
-        if action == "restore":
-            return rv.restore(did)
+        if action in ("dismiss", "restore"):
+            out = rv.dismiss(did) if action == "dismiss" else rv.restore(did)
+            _refresh_names([did])
+            return out
     except rv.ReviewError as e:
         raise _bad(e) from e
     raise HTTPException(404, "Unknown action")

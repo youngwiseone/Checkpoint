@@ -57,8 +57,17 @@ def provisional_title(text: str) -> str:
 
 
 def default_project_id() -> str:
-    """Captures outside a session go to the last used project, or a created 'General' project."""
-    pid = get_settings().last_project_id
+    """Captures outside a session go to the project whose program is in the foreground, else the last
+    used project, else a created 'General' project."""
+    pid = None
+    try:
+        from ..capture.win32 import foreground_window
+        from .flow import project_for_window
+
+        pid = project_for_window(foreground_window())
+    except Exception:  # noqa: BLE001 - inference is a convenience, never a reason to lose a capture
+        pid = None
+    pid = pid or get_settings().last_project_id
     with write_session() as s:
         if pid and s.get(Project, pid) is not None:
             return pid

@@ -169,6 +169,9 @@ class ExtractionWorker(Worker):
                 progress=lambda p, st: self._set(run_id, progress=p, stage=st),
                 cancelled=lambda: self._is_cancelled(run_id),
             )
+            from ..services.suggestions import clear_untouched
+
+            clear_untouched(session_id)  # the organiser rebuilds unreviewed suggestions from the same speech
             stats = pipe.run(session_id, run_id)
             self._set(run_id, state="done", progress=1.0, stage="Done", stats=stats, finished_at=utcnow())
             notices.push("success", f"Organised session: {stats.get('created', 0)} new card(s), {stats.get('updated', 0)} updated.", "organiser")

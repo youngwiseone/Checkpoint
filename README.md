@@ -37,6 +37,7 @@ for troubleshooting.
 | **Shift+F8** | Screenshot and always ask for a note. |
 | **F9** | Text-only quick note. |
 | **Ctrl+F8** | Start a session for the current project with the same setup as its last session. Press twice within 3 s to end it. |
+| **Ctrl+F9** | Review overlay: one card at a time, then send what you approved to the project's coding agent. |
 
 **Set and forget:** pick the project in the sidebar and press **Start session** (or **Ctrl+F8** anywhere). Each
 session starts like the project's previous one (audio sources, devices, labels, transcription, auto screenshots).
@@ -56,7 +57,45 @@ and never uploads anything.
 
 Try it with **Load demo project** on the Session page of a new install (clearly labelled synthetic data).
 
-## Sending items to an AI assistant
+## Review, send, refresh
+
+The everyday loop runs from shortcuts, without opening the main window:
+
+1. **Capture.** F8 / Shift+F8 / F9 as above. With audio on, an F8 press (or an auto screenshot) becomes a
+   *suggested* card as soon as the speech around it is transcribed, so you don't have to end the session.
+2. **Review with Ctrl+F9.** One card at a time with its screenshot: **A** approve, **D** dismiss, **U** undo,
+   **E** edit (the first line is the title; **Ctrl+Enter** saves), **N** rename the session, **Tab** task status,
+   **Esc** hides it from anywhere and keeps your place and any unsaved text. Letter keys never act while you type.
+   The overlay opens on the running session, else the project whose program is in the foreground, and only asks
+   when several projects have work waiting.
+3. **Send with S** (or *Send approved*). It shows how many tasks go where (agent, branch, repo) before sending.
+   Only approved, unsent tasks in that session go; dismissed and unreviewed cards stay out, and a task is never
+   sent twice. A report that repeats a task that's already in progress is added to it as evidence instead of
+   becoming a second fix; if the earlier task was already finished, it's sent as a follow-up to it.
+4. **Status.** Approved → Sending → Sent to agent (only once the agent has accepted it) → Working → Ready, or
+   **Needs you** with the reason (a question from the agent, failed checks, a preview that didn't start).
+5. **Ready to refresh.** After the agent finishes, Checkpoint runs the project's check command and restarts the
+   preview from the session's working copy. A task is only Ready when that preview is running a commit that
+   contains its change.
+
+**Names and branches.** A session's name is suggested from its tasks and refined while you review. The first send
+locks it and creates `checkpoint/<name>` (with `-2` only if that's taken) in its own worktree under the data folder;
+your own checkout is never switched or changed. Every later send from the session lands on the same branch, one
+commit per task (`T-3: ...`). When you're happy, **Open pull request** pushes the branch and opens the PR (with `gh`)
+or the host's compare page; **Merge** only ever runs when you press it.
+
+**Agents.** Claude Code (`claude`) and Codex (`codex`) run headless in the session's working copy. The prompt asks
+them to hand independent tasks to subagents, do overlapping ones in order, commit each task separately, and report
+progress through the Checkpoint connector's `report_task` tool (only available to runs Checkpoint started; the
+connector stays read-only everywhere else). Later batches in a session resume the same Claude Code conversation.
+*Standard* access lets the agent edit files, run `git add/commit` and the check command; *Full* skips permission
+prompts inside the working copy. Push, merge, rebase, reset and branch switching are always blocked. Sign the agent
+in once (`claude`, then `/login`) before the first send.
+
+**Set up each project once** in Settings → Projects (also offered when you create a project): the repo, base branch,
+the program that runs it, the default agent and access, and optional setup / check / preview commands and preview URL.
+
+## Sending items to an AI assistant by hand
 
 In **Items**, tick items (Shift+click selects a range) and press **Send to Claude / Codex**, or press
 **Send all N** to send the whole filtered list. With several items the prompt asks the assistant to work

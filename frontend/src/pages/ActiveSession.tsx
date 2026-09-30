@@ -6,6 +6,7 @@ import { api } from "../api";
 import type { SessionDetail, SourceStatus, TimelineItem } from "../types";
 import { Banner, Meter, Modal, Toggle, fmtOffset, useToast, Lightbox } from "../components/ui";
 import Checklist from "../components/Checklist";
+import SessionFlow from "../components/SessionFlow";
 import RecordingChips, { type ChipState } from "../components/RecordingChips";
 import { useAppState, useSettings } from "../state";
 
@@ -150,6 +151,8 @@ export default function ActiveSession() {
         )}
         <button className="btn danger" onClick={() => setConfirmEnd(true)}><Square size={15} /> End session</button>
       </div>
+
+      {detail.data && !detail.data.is_demo && <SessionFlow sessionId={sid!} style={{ marginBottom: 20 }} />}
 
       <div className="card stack" style={{ marginBottom: 20 }}>
         <div className="row"><h3 className="grow">Recording</h3><span className="muted small">Changes apply immediately (also from the tray menu)</span></div>

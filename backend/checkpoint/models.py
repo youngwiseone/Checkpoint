@@ -88,6 +88,16 @@ class Project(Base):
     shared_server_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     shared_project_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     last_refreshed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    # Where approved tasks go: the project's repo (each session works on its own branch in its own
+    # working copy), the agent that works on them, and how to check and preview its changes.
+    repo_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    base_branch: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    default_agent: Mapped[str] = mapped_column(String(20), default="none")  # none | claude | codex
+    agent_access: Mapped[str] = mapped_column(String(20), default="standard")  # standard | full
+    setup_command: Mapped[str] = mapped_column(Text, default="")  # run once in a new working copy (e.g. npm install)
+    check_command: Mapped[str] = mapped_column(Text, default="")  # must pass before a change is Ready
+    preview_command: Mapped[str] = mapped_column(Text, default="")  # runs the app from the session's working copy
+    preview_url: Mapped[str] = mapped_column(String(500), default="")  # answers once the preview is serving
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
@@ -113,6 +123,14 @@ class Session(Base):
     processing_state: Mapped[str] = mapped_column(String(20), default="none")
     raw_audio_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The name is suggested from the session's tasks until the first send, then locked with its branch.
+    name_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    name_edited: Mapped[bool] = mapped_column(Boolean, default=False)
+    branch: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    worktree_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    base_commit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    agent_session_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # resumed by later sends
+    pr_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     project: Mapped[Project] = relationship(back_populates="sessions")
@@ -284,8 +302,19 @@ class WorkItem(Base):
     conflict_server_copy: Mapped[Any] = mapped_column(JSON, nullable=True)
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    # Agent progress, separate from work status: None (approved, not sent) | sending | sent | working | ready | needs_you
+    task_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # T-<n> within its session
+    agent_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    agent_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    agent_run_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    agent_commit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    duplicate_of_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # a repeat report, added as evidence
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+AGENT_STATES = ("sending", "sent", "working", "ready", "needs_you")
 
 
 class DraftItem(Base):
@@ -391,3 +420,29 @@ class Handoff(Base):
     instruction: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     fetched_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+
+
+class AgentRun(Base):
+    """One batch of a session's approved tasks, worked on by a coding agent in the session's working copy."""
+
+    __tablename__ = "agent_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    agent: Mapped[str] = mapped_column(String(20))
+    # queued | starting | running | checking | done | failed | cancelled
+    state: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    stage: Mapped[str] = mapped_column(String(300), default="")
+    item_ids: Mapped[Any] = mapped_column(JSON, default=list)
+    handoff_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    agent_session_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    log_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    head_before: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    head_after: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)

@@ -191,6 +191,14 @@ def visible_windows() -> list[dict]:
     return out
 
 
+def foreground_window() -> Optional[dict]:
+    """{exe, title} of the foreground window, for matching it to a project."""
+    fg = foreground_info()
+    if fg is None:
+        return None
+    return {"exe": _exe_name(fg.pid) if fg.pid else "", "title": fg.title}
+
+
 def current_pid() -> int:
     import os
 

@@ -104,6 +104,15 @@ export interface Project {
   session_count: number;
   open_items: number;
   pending_cards: number;
+  repo_path: string | null;
+  base_branch: string | null;
+  default_agent: AgentId | "none";
+  agent_access: "standard" | "full";
+  setup_command: string;
+  check_command: string;
+  preview_command: string;
+  preview_url: string;
+  configured: boolean;
 }
 
 export interface SessionSummary {
@@ -306,7 +315,7 @@ export interface AudioDevices {
 
 export interface Settings {
   first_run_complete: boolean;
-  hotkeys: { capture: string; capture_context: string; quick_note: string; start_session: string };
+  hotkeys: { capture: string; capture_context: string; quick_note: string; start_session: string; review: string };
   capture: { always_ask_context: boolean; region: "foreground_monitor" | "foreground_window"; debounce_ms: number };
   audio: {
     mic_enabled: boolean;
@@ -322,6 +331,111 @@ export interface Settings {
   auto_capture: { enabled: boolean; model: string; threshold: number; frame_interval_s: number; buffer_seconds: number; cooldown_s: number; max_per_session: number; lead_s: number };
   app_watch: { enabled: boolean; rules: WatchRule[] };
   sharing: { server_url: string; display_name: string; allow_insecure_private_network: boolean };
+  agents: { claude_path: string; codex_path: string };
   last_project_id: string | null;
   data_dir: string;
+}
+
+// ---------------------------------------------------------------- coding agents
+export type AgentId = "claude" | "codex";
+
+export interface AgentInfo {
+  id: AgentId;
+  name: string;
+  path: string | null;
+}
+
+export interface RepoInspect {
+  root: string;
+  current_branch: string | null;
+  default_branch: string | null;
+  remote_url: string | null;
+  branches: string[];
+}
+
+export type FlowTaskState = "approved" | "sending" | "sent" | "working" | "checking" | "ready" | "needs_you" | "merged";
+
+export interface FlowTask {
+  id: string;
+  code: string;
+  title: string;
+  type: ItemType;
+  state: FlowTaskState;
+  label: string | null;
+  checking: boolean;
+  note: string | null;
+  commit: string | null;
+  live: boolean;
+  duplicate_of: string | null;
+  run_id: string | null;
+  sent_at: string | null;
+  work_status: WorkStatus | null;
+}
+
+export interface FlowRun {
+  id: string;
+  state: "queued" | "starting" | "running" | "checking" | "done" | "failed" | "cancelled";
+  stage: string | null;
+  agent: string;
+  agent_label: string;
+  items: number;
+  summary: string | null;
+  error: string | null;
+  log_path: string | null;
+  created_at: string | null;
+  accepted_at: string | null;
+  finished_at: string | null;
+}
+
+export interface PreviewStatus {
+  state: "starting" | "running" | "failed" | "stopped";
+  commit: string | null;
+  url: string | null;
+  error: string | null;
+  log?: string | null;
+}
+
+export interface SessionFlow {
+  session: {
+    id: string;
+    title: string;
+    name_locked: boolean;
+    name_edited: boolean;
+    branch: string | null;
+    worktree_path: string | null;
+    pr_url: string | null;
+    state: string;
+    project_id: string;
+  };
+  project: {
+    id: string;
+    name: string;
+    agent: AgentId | "none";
+    agent_label: string;
+    repo_path: string | null;
+    base_branch: string | null;
+    has_preview: boolean;
+    problems: string[];
+  };
+  counts: Partial<Record<FlowTaskState, number>> & { pending: number };
+  tasks: FlowTask[];
+  runs: FlowRun[];
+  preview: PreviewStatus | null;
+  ready_to_refresh: boolean;
+  cards: unknown[];
+  approved_unsent: number;
+}
+
+export interface SendPlan {
+  count: number;
+  tasks: { id: string; title: string; type: ItemType; follow_up_of: string | null }[];
+  merges: { id: string; title: string; into: string; into_title: string }[];
+  agent: AgentId | "none";
+  agent_label: string;
+  branch: string;
+  branch_new: boolean;
+  name: string;
+  repo: string | null;
+  queued_behind_current: boolean;
+  problems: string[];
 }

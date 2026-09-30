@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderPlus, Mic, MonitorSpeaker, Play, Trash2, FlaskConical, ImageOff, AppWindow, X, SlidersHorizontal } from "lucide-react";
+import { FolderPlus, Mic, MonitorSpeaker, Play, Trash2, FlaskConical, ImageOff, AppWindow, SlidersHorizontal, GitBranch } from "lucide-react";
 import { api, qs } from "../api";
-import type { Capture, Project, SessionSetup, SessionSummary, Settings, WatchRule } from "../types";
+import type { Capture, Project, SessionSetup, SessionSummary, Settings } from "../types";
+import { AutoStartRule, ProjectSetupModal } from "../components/ProjectSetup";
 import { Banner, Empty, Modal, Spinner, fmtDate, fmtDuration, fmtOffset, useToast } from "../components/ui";
 import { useAppState, useCurrentProject, useSettings } from "../state";
 import { CaptureNoteModal } from "./SessionDetail";
@@ -16,6 +17,8 @@ export function ProjectModal({ project, onClose }: { project?: Project; onClose:
   const [glossary, setGlossary] = useState(project?.glossary ?? "");
   const qc = useQueryClient();
   const toast = useToast();
+  // After creating, or from the pencil: optional repo + agent setup step.
+  const [setup, setSetup] = useState<{ p: Project; isNew: boolean } | null>(null);
   const save = useMutation({
     mutationFn: () =>
       project
@@ -23,16 +26,20 @@ export function ProjectModal({ project, onClose }: { project?: Project; onClose:
         : api.post<Project>("/api/projects", { name, description, glossary }),
     onSuccess: (p) => {
       qc.invalidateQueries({ queryKey: ["projects"] });
-      onClose(p);
+      if (!project && p?.id) setSetup({ p, isNew: true });
+      else onClose(p);
     },
     onError: (e: Error) => toast("error", e.message),
   });
+  if (setup) return <ProjectSetupModal project={setup.p} isNew={setup.isNew} onClose={() => onClose(setup.isNew ? setup.p : undefined)} />;
   return (
     <Modal
       title={project ? "Project details" : "New project"}
       onClose={() => onClose()}
       footer={
         <>
+          {project && <button className="btn ghost" onClick={() => setSetup({ p: project, isNew: false })}><GitBranch size={15} /> Repo & agent setup…</button>}
+          <span className="spacer" />
           <button className="btn" onClick={() => onClose()}>Cancel</button>
           <button className="btn primary" disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>{project ? "Save" : "Create project"}</button>
         </>
@@ -100,54 +107,6 @@ function UnfinishedInbox({ projectId }: { projectId: string }) {
         ))}
       </div>
       {open && <CaptureNoteModal capture={open} onClose={() => setOpen(null)} />}
-    </div>
-  );
-}
-
-function AutoStartRule({ project, settings }: { project: Project; settings: Settings }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [picking, setPicking] = useState(false);
-  const rules = settings.app_watch.rules;
-  const mine = rules.find((r) => r.project_id === project.id);
-  const apps = useQuery({ queryKey: ["running-apps"], queryFn: () => api.get<{ exe: string; title: string }[]>("/api/running-apps"), enabled: picking });
-  const save = useMutation({
-    mutationFn: (rule: WatchRule | null) => api.patch("/api/settings", { app_watch: { enabled: true, rules: [...rules.filter((r) => r.project_id !== project.id), ...(rule ? [rule] : [])] } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["settings"] }); setPicking(false); },
-    onError: (e: Error) => toast("error", e.message),
-  });
-  const hk = settings.hotkeys.start_session;
-  if (picking) {
-    return (
-      <div className="stack" style={{ gap: 8 }}>
-        <span className="small text-2">Start the program you test, then pick it. Picking by program is safest; pick by window title if the program is shared (e.g. a game engine editor).</span>
-        {apps.isLoading ? <Spinner /> : (
-          <div style={{ maxHeight: 240, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
-            {(apps.data ?? []).map((a) => (
-              <div key={a.exe + a.title} className="row" style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)" }}>
-                <span className="grow truncate small" title={a.title}><b>{a.exe}</b> — {a.title}</span>
-                <button className="btn sm" onClick={() => save.mutate({ project_id: project.id, kind: "exe", match: a.exe })}>This program</button>
-                <button className="btn sm ghost" onClick={() => save.mutate({ project_id: project.id, kind: "title", match: a.title })}>This window title</button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="row"><button className="btn sm" onClick={() => apps.refetch()}>Refresh list</button><button className="btn sm ghost" onClick={() => setPicking(false)}>Cancel</button></div>
-      </div>
-    );
-  }
-  return mine ? (
-    <div className="row small text-2 wrap">
-      <AppWindow size={15} />
-      <span>When <b>{mine.match}</b> {mine.kind === "title" ? "(window title) " : ""}is running, Checkpoint offers to start a session — press <kbd>{hk}</kbd>.</span>
-      <button className="btn sm ghost" onClick={() => setPicking(true)}>Change</button>
-      <button className="icon-btn" aria-label="Stop watching" title="Stop watching" onClick={() => save.mutate(null)}><X size={14} /></button>
-    </div>
-  ) : (
-    <div className="row small text-2 wrap">
-      <AppWindow size={15} />
-      <span>Press <kbd>{hk}</kbd> anywhere to start with these settings.</span>
-      <button className="btn sm ghost" onClick={() => setPicking(true)}>Offer a session when a program starts…</button>
     </div>
   );
 }

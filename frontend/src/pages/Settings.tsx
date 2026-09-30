@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Integration } from "../components/SendToAI";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Download, KeyRound, Link2, Unlink, Save, ShieldCheck } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Download, KeyRound, Link2, Unlink, Save, ShieldCheck } from "lucide-react";
 import { api } from "../api";
 import type { HotkeyBinding, Project, Settings } from "../types";
 import { Banner, Spinner, Toggle, fmtBytes, useToast } from "../components/ui";
 import { useAppState, useProjects } from "../state";
 import { ReadinessList } from "./Welcome";
+import { AgentPaths, ProjectSetupForm } from "../components/ProjectSetup";
 
-type Tab = "general" | "shortcuts" | "transcription" | "ai" | "assistants" | "sharing" | "storage";
+type Tab = "general" | "projects" | "shortcuts" | "transcription" | "ai" | "assistants" | "sharing" | "storage";
 
 function useSettings() {
   return useQuery({ queryKey: ["settings"], queryFn: () => api.get<Settings>("/api/settings") });
@@ -31,7 +32,7 @@ function Shortcuts({ s }: { s: Settings }) {
   const { data: state } = useAppState();
   const toast = useToast();
   const bindings = state?.desktop.hotkeys.bindings ?? [];
-  const labels: Record<string, string> = { capture: "Capture screenshot", capture_context: "Screenshot + always ask for a note", quick_note: "Text-only quick note", start_session: "Start session (press twice to end)" };
+  const labels: Record<string, string> = { capture: "Capture screenshot", capture_context: "Screenshot + always ask for a note", quick_note: "Text-only quick note", start_session: "Start session (press twice to end)", review: "Review overlay" };
   const save = () => patch.mutate({ hotkeys: hk }, {
     onSuccess: (r) => {
       if (r.hotkeys && !r.hotkeys.ok) toast("warning", `Some shortcuts couldn't be registered: ${r.hotkeys.reason}`);
@@ -44,12 +45,12 @@ function Shortcuts({ s }: { s: Settings }) {
         <h3>Global shortcuts</h3>
         <p className="text-2 small">Registered with Windows so they work in games and other apps. Use F-keys, or combine a key with Ctrl/Alt/Shift (e.g. <code>Ctrl+Alt+S</code>).</p>
         {!state?.desktop.available && <Banner kind="warn">The desktop helper isn't running, so shortcuts aren't active. Launch with <code>start.cmd</code>.</Banner>}
-        {(["capture", "capture_context", "quick_note", "start_session"] as const).map((k) => {
+        {(["capture", "capture_context", "quick_note", "start_session", "review"] as const).map((k) => {
           const b = bindings.find((x) => x.action === k);
           return (
             <div key={k} className="row">
               <label htmlFor={`hk-${k}`} className="label" style={{ width: 280 }}>{labels[k]}</label>
-              <input id={`hk-${k}`} className="input mono" style={{ width: 180 }} value={hk[k]} onChange={(e) => setHk({ ...hk, [k]: e.target.value })} />
+              <input id={`hk-${k}`} className="input mono" style={{ width: 180 }} value={hk[k] ?? ""} onChange={(e) => setHk({ ...hk, [k]: e.target.value })} />
               {b && (b.registered ? <span className="badge success">Active</span> : <span className="badge danger" title={b.error ?? ""}>{b.error}</span>)}
             </div>
           );
@@ -389,12 +390,53 @@ function Assistants() {
   );
 }
 
+function Projects({ s, focus }: { s: Settings; focus: string | null }) {
+  const { data: projects } = useProjects();
+  const [open, setOpen] = useState<Set<string>>(() => new Set(focus ? [focus] : []));
+  const scrolled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focus || scrolled.current === focus) return;
+    setOpen((o) => new Set(o).add(focus));
+    const el = document.getElementById(`proj-${focus}`);
+    if (el) { el.scrollIntoView({ block: "start" }); scrolled.current = focus; }
+  }, [focus, projects]);
+  const list = (projects ?? []).filter((p) => !p.is_demo && !p.archived);
+  const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  return (
+    <div className="stack-lg">
+      <div className="card stack">
+        <h3>Projects</h3>
+        <p className="text-2 small">Link a project to its Git repo and a coding agent. Approved tasks then go to the agent, which works on a separate branch for each session.</p>
+        {!projects ? <Spinner /> : !list.length ? <p className="muted small">No projects yet.</p> : list.map((p) => {
+          const isOpen = open.has(p.id);
+          return (
+            <div key={p.id} id={`proj-${p.id}`} style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+              <button className="btn ghost" style={{ width: "100%", justifyContent: "flex-start", padding: "6px 4px" }} aria-expanded={isOpen} onClick={() => toggle(p.id)}>
+                {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <b className="grow truncate" style={{ textAlign: "left", color: "var(--text)" }}>{p.name}</b>
+                {p.configured ? <span className="badge success">Ready to send</span> : p.repo_path ? <span className="badge warn">No agent</span> : <span className="badge neutral">Not set up</span>}
+              </button>
+              {isOpen && <div style={{ padding: "8px 4px 16px 26px" }}><ProjectSetupForm project={p} /></div>}
+            </div>
+          );
+        })}
+      </div>
+      <details className="card">
+        <summary className="label" style={{ cursor: "pointer" }}>Agent programs</summary>
+        <p className="hint" style={{ margin: "8px 0 12px" }}>Leave empty to find them automatically.</p>
+        <AgentPaths settings={s} />
+      </details>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
-  const [params] = useSearchParams();
-  const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) || "general");
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = (params.get("tab") as Tab) || "general";
+  const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   const s = useSettings();
   useEffect(() => { document.title = "Settings · Checkpoint"; return () => { document.title = "Checkpoint"; }; }, []);
-  const tabs: [Tab, string][] = [["general", "General"], ["shortcuts", "Shortcuts & capture"], ["transcription", "Transcription"], ["ai", "Local AI"], ["assistants", "AI assistants"], ["sharing", "Sharing"], ["storage", "Storage"]];
+  const tabs: [Tab, string][] = [["general", "General"], ["projects", "Projects"], ["shortcuts", "Shortcuts & capture"], ["transcription", "Transcription"], ["ai", "Local AI"], ["assistants", "AI assistants"], ["sharing", "Sharing"], ["storage", "Storage"]];
   return (
     <div className="page">
       <div className="page-head"><div className="grow"><h1>Settings</h1><p>Optional features have clear setup steps; none of them are required to capture.</p></div></div>
@@ -402,6 +444,7 @@ export default function SettingsPage() {
       {!s.data ? <Spinner /> : (
         <>
           {tab === "general" && <div className="card"><div className="card-head"><h3>Readiness</h3></div><ReadinessList /></div>}
+          {tab === "projects" && <Projects s={s.data} focus={params.get("project")} />}
           {tab === "shortcuts" && <Shortcuts s={s.data} />}
           {tab === "transcription" && <Transcription s={s.data} />}
           {tab === "ai" && <LocalAI s={s.data} />}

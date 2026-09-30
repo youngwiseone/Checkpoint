@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from ..config import DEV_MODE, FRONTEND_DIST, HOST
+from .flow_routes import router as flow_router
 from .routes import router
 from .security import AuthState, LocalSecurityMiddleware
 
@@ -26,6 +27,7 @@ def create_app(auth: AuthState) -> FastAPI:
     app.state.auth = auth
     app.add_middleware(LocalSecurityMiddleware, auth=auth)
     app.include_router(router)
+    app.include_router(flow_router)
 
     @app.exception_handler(Exception)
     async def unhandled(_req, exc: Exception):  # noqa: ANN001, ANN202

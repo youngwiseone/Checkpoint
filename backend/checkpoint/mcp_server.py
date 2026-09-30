@@ -9,6 +9,7 @@ protocol, so all logging goes to stderr.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
@@ -114,6 +115,27 @@ def get_item(item_id: str, include_screenshots: bool = True) -> list:
     except ValueError as e:
         return [str(e)]
     return _bundle_content(b)
+
+
+# Only an agent run started by Checkpoint (which sets CHECKPOINT_AGENT_RUN) can report progress;
+# the connector used from Claude Desktop or Codex chats stays read-only.
+AGENT_RUN = os.environ.get("CHECKPOINT_AGENT_RUN", "").strip()
+
+if AGENT_RUN:
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
+    def report_task(task: str, status: str, note: str = "", commit: str = "") -> str:
+        """Tell Checkpoint how a task is going. The user sees this as the task's status.
+
+        Args:
+            task: The task's T-number, for example "T-2".
+            status: working (started it), done (committed), blocked (needs a decision from the user; put the question in note),
+                or cannot_reproduce (couldn't find the problem; say what you checked in note).
+            note: One or two sentences for the user.
+            commit: For done: the commit hash of this task's change.
+        """
+        from .services.agents import report
+
+        return report(AGENT_RUN, task, status, note, commit)
 
 
 def main() -> None:

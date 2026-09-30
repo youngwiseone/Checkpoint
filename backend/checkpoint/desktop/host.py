@@ -28,6 +28,7 @@ from ..config import DEFAULT_PORT
 from ..core import get_core
 from ..events import hooks, notices
 from ..settings_store import get_settings
+from .overlay import ReviewOverlay
 from .windows import NoteWindow, Toast
 
 log = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ class Bridge(QObject):
     toast_requested = Signal(str, str, object)
     state_changed = Signal()
     offer_requested = Signal(dict)
+    review_requested = Signal(dict)
 
 
 class DesktopHost:
@@ -72,6 +74,8 @@ class DesktopHost:
         self.bridge = Bridge()
         self.note_window = NoteWindow(self._save_note, self._keep_capture, self._discard_capture)
         self.toast = Toast()
+        self.overlay = ReviewOverlay(self.core.previews)
+        self.bridge.review_requested.connect(self._toggle_overlay)
         self.bridge.note_requested.connect(self.note_window.open_for)
         self.bridge.toast_requested.connect(lambda lvl, msg, work: self.toast.show_message(lvl, msg, work))
         self.bridge.state_changed.connect(self._refresh_tray)
@@ -129,6 +133,9 @@ class DesktopHost:
     def _on_hotkey(self, action: str) -> None:
         """Runs on the hotkey thread. Capture first, UI after."""
         mono = time.monotonic()
+        if action == "review":
+            self._review_hotkey()
+            return
         if self.note_window.isVisible():
             # Never capture our own popup; ask the user to finish the open note.
             hooks.emit_toast("warning", "Finish or press Esc on the open note first.")
@@ -150,6 +157,28 @@ class DesktopHost:
                 "id": None, "mono": mono, "fg_hwnd": fg.hwnd if fg else 0,
                 "work_rect": fg.work_rect.as_mss() if fg and fg.work_rect else None,
             })
+
+    # ------------------------------------------------------------ review overlay
+    def _review_hotkey(self) -> None:
+        """Hotkey thread: note what's in the foreground (to infer the project), then show the overlay."""
+        from ..capture import win32
+
+        fg = win32.foreground_info()
+        own = fg is not None and fg.pid == win32.current_pid()
+        window = None
+        if fg is not None and not own:
+            window = win32.foreground_window()
+        self.bridge.review_requested.emit({
+            "window": window, "fg_hwnd": fg.hwnd if fg and not own else 0,
+            "work_rect": fg.work_rect.as_mss() if fg and fg.work_rect else None,
+        })
+
+    def _toggle_overlay(self, payload: dict) -> None:
+        if self.note_window.isVisible():
+            hooks.emit_toast("warning", "Finish or press Esc on the open note first.")
+            return
+        a = self.core.sessions.active
+        self.overlay.toggle(a.id if a else None, payload.get("window"), payload.get("work_rect"), payload.get("fg_hwnd") or 0)
 
     # ------------------------------------------------------------ one-key sessions
     def _hotkey_label(self) -> str:
@@ -234,13 +263,14 @@ class DesktopHost:
         self.act_status = QAction("No session running")
         self.act_status.setEnabled(False)
         self.act_start = QAction("Start session", triggered=lambda: self._quick_start())
+        self.act_review = QAction("Review and send…", triggered=lambda: self._toggle_overlay({}))
         self.act_pause = QAction("Pause recording", triggered=self._toggle_pause)
         self.act_mic = QAction("Record microphone", checkable=True, triggered=lambda on: self._toggle_source("mic", on))
         self.act_loop = QAction("Record computer audio", checkable=True, triggered=lambda on: self._toggle_source("loopback", on))
         self.act_auto = QAction("Auto screenshots", checkable=True, triggered=self._toggle_auto)
         self.act_end = QAction("End session", triggered=self._end_session)
         self.act_quit = QAction("Quit", triggered=self.quit)
-        for a in (self.act_open, None, self.act_status, self.act_start, self.act_pause, self.act_mic, self.act_loop, self.act_auto,
+        for a in (self.act_open, self.act_review, None, self.act_status, self.act_start, self.act_pause, self.act_mic, self.act_loop, self.act_auto,
                   self.act_end, None, self.act_quit):
             if a is None:
                 menu.addSeparator()
@@ -377,7 +407,7 @@ class DesktopHost:
         def bindings() -> dict[str, str]:
             hk = get_settings().hotkeys
             return {"capture": hk.capture, "capture_context": hk.capture_context, "quick_note": hk.quick_note,
-                    "start_session": hk.start_session}
+                    "start_session": hk.start_session, "review": hk.review}
 
         self.hotkeys = HotkeyThread(bindings, self._on_hotkey)
         self.hotkeys.start()

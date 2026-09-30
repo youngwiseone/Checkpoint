@@ -18,6 +18,7 @@ class HotkeySettings(BaseModel):
     capture_context: str = "Shift+F8"
     quick_note: str = "F9"
     start_session: str = "Ctrl+F8"  # start a session (the offered project, else the last one); press twice quickly to end
+    review: str = "Ctrl+F9"  # the keyboard-first review overlay
 
 
 class CaptureSettings(BaseModel):
@@ -87,6 +88,12 @@ class AppWatchSettings(BaseModel):
     rules: list[WatchRule] = Field(default_factory=list)
 
 
+class AgentSettings(BaseModel):
+    # Leave empty to find the agent on PATH or in its usual install folders.
+    claude_path: str = ""
+    codex_path: str = ""
+
+
 class SharingSettings(BaseModel):
     server_url: str = ""
     display_name: str = ""
@@ -103,6 +110,7 @@ class AppSettings(BaseModel):
     auto_capture: AutoCaptureSettings = Field(default_factory=AutoCaptureSettings)
     app_watch: AppWatchSettings = Field(default_factory=AppWatchSettings)
     sharing: SharingSettings = Field(default_factory=SharingSettings)
+    agents: AgentSettings = Field(default_factory=AgentSettings)
     last_project_id: Optional[str] = None
     version: int = SETTINGS_VERSION
 

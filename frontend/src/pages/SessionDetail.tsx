@@ -6,6 +6,7 @@ import { api, qs } from "../api";
 import type { Capture, ItemType, SessionDetail as SD, TimelineItem } from "../types";
 import { Banner, Empty, Modal, Spinner, TYPES, TYPE_LABEL, fmtBytes, fmtDate, fmtDuration, fmtOffset, useToast, Lightbox } from "../components/ui";
 import Checklist from "../components/Checklist";
+import SessionFlow from "../components/SessionFlow";
 import { useAppState } from "../state";
 
 const CATS: { v: string; l: string }[] = [{ v: "", l: "No category" }, ...TYPES.map((t) => ({ v: t, l: TYPE_LABEL[t] }))];
@@ -362,6 +363,7 @@ export default function SessionDetail() {
           </Banner>
         </div>
       )}
+      {!s.is_demo && <SessionFlow sessionId={s.id} style={{ marginBottom: 18 }} />}
       <div className="split split-right">
         <div>
           <div className="tabs" role="tablist">
