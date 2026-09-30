@@ -1,0 +1,7 @@
+# Checkpoint shared server (any OS). No audio, Qt, Whisper or Ollama needed.
+fastapi==0.142.1
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+SQLAlchemy==2.1.1
+alembic==1.20.0
+psycopg[binary]==3.3.6

@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Checkpoint (desktop)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "checkpoint",
+      "cwd": "${workspaceFolder}/backend",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "env": { "PYTHONIOENCODING": "utf-8" }
+    },
+    {
+      "name": "Checkpoint (headless API, dev UI on :5173)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "checkpoint.headless",
+      "args": ["--no-browser"],
+      "cwd": "${workspaceFolder}/backend",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "env": { "PYTHONIOENCODING": "utf-8", "CHECKPOINT_DEV": "1" }
+    }
+  ]
+}
