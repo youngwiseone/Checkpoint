@@ -6,6 +6,11 @@ buffer grabs the screen every couple of seconds and keeps the last ~90 s in memo
 only; when the model picks a transcript line, the frame from when it was said is saved
 as an ordinary audio marker. Frames that aren't picked never touch the disk.
 
+Whisper lines are long (up to a whole 20 s audio block), so a picked line is narrowed to the
+sentence the model rates highest and the frame is taken from just before that sentence was
+said. Short filler, low-confidence lines and known Whisper hallucinations are never asked
+about, picks close to a manual screenshot are skipped, and a cooldown spaces shots out.
+
 The decision comes from a System One (Jev-style) model through Ollama's /v1/systemone
 endpoint: it returns the probability that a screenshot is worth taking and never writes text.
 """
@@ -13,6 +18,7 @@ endpoint: it returns the probability that a screenshot is worth taking and never
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -22,7 +28,7 @@ from sqlalchemy import select
 
 from ..db import read_session
 from ..events import notices
-from ..models import TranscriptSegment
+from ..models import Capture, TranscriptSegment
 from ..settings_store import get_settings
 from ..workers import HEAVY_LOCK, Worker
 
@@ -30,6 +36,22 @@ log = logging.getLogger(__name__)
 
 # Short and specific works best for the small decision models (tev1:0.8b scored 10/10 on a sample set with this).
 QUESTION = "Is the speaker pointing out a bug, glitch or problem they can see on screen?"
+MIN_WORDS = 3
+MANUAL_NEARBY_S = 20  # a hotkey screenshot this close already covers the moment
+# Whisper invents these on silence or music; they're never about the screen.
+HALLUCINATIONS = ("subscribe", "thanks for watching", "thank you for watching", "see you next time", "like and subscribe")
+_SENTENCE = re.compile(r"[^.?!]+[.?!]*")
+
+
+def worth_asking(text: str, low_confidence: bool = False) -> bool:
+    t = text.strip().lower()
+    return not low_confidence and len(t.split()) >= MIN_WORDS and not any(h in t for h in HALLUCINATIONS)
+
+
+def sentences(text: str) -> list[tuple[int, str]]:
+    """(start character, sentence) for sentences long enough to judge on their own."""
+    return [(m.start() + len(m.group()) - len(m.group().lstrip()), m.group().strip())
+            for m in _SENTENCE.finditer(text) if len(m.group().split()) >= MIN_WORDS]
 
 
 class FrameBuffer:
@@ -105,7 +127,7 @@ class AutoCaptureWorker(Worker):
         self.session_id: Optional[str] = None
         self.seen: set[str] = set()
         self.count = 0
-        self.last_shot = 0.0
+        self.last_shot_ms: Optional[int] = None
         self.state = "off"  # off | needs_live | watching
         self.model_error: Optional[str] = None
         self._provider = None
@@ -117,10 +139,20 @@ class AutoCaptureWorker(Worker):
             self._provider = OllamaProvider(base_url, timeout=120, max_retries=1)  # first call loads the model
         return self._provider
 
-    def decide(self, text: str) -> bool:
+    def score(self, text: str) -> float:
         st = get_settings()
-        p = self._decider(st.ai.base_url).noul(st.auto_capture.model, {"transcript_line": text}, QUESTION)
-        return p >= st.auto_capture.threshold
+        return self._decider(st.ai.base_url).noul(st.auto_capture.model, {"transcript_line": text}, QUESTION)
+
+    def decide(self, text: str) -> bool:
+        return self.score(text) >= get_settings().auto_capture.threshold
+
+    def locate(self, text: str) -> tuple[str, float]:
+        """The sentence the remark is in, and how far into the line it starts (0-1)."""
+        parts = sentences(text)
+        if len(parts) < 2:
+            return text.strip(), 0.0
+        best = max(parts, key=lambda p: self.score(p[1]))
+        return best[1], best[0] / max(1, len(text))
 
     def _idle(self, state: str) -> bool:
         if self.frames.running:
@@ -138,7 +170,7 @@ class AutoCaptureWorker(Worker):
         if a.paused:
             return self._idle("watching")
         if a.id != self.session_id:
-            self.session_id, self.seen, self.count, self.last_shot = a.id, set(), 0, 0.0
+            self.session_id, self.seen, self.count, self.last_shot_ms = a.id, set(), 0, None
             from ..extraction.ollama import ensure_running
 
             ensure_running(st.ai.base_url)
@@ -158,14 +190,18 @@ class AutoCaptureWorker(Worker):
                 .where(TranscriptSegment.session_id == a.id, TranscriptSegment.start_ms >= a.clock.offset_ms(oldest))
                 .order_by(TranscriptSegment.start_ms)
             ).all()
-            rows = [(g.id, g.start_ms, (g.corrected_text or g.text).strip()) for g in segs]
-        for seg_id, start_ms, text in rows:
+            rows = [(g.id, g.start_ms, g.end_ms, (g.corrected_text or g.text).strip(), g.low_confidence) for g in segs]
+        for seg_id, start_ms, end_ms, text, low in rows:
             if seg_id in self.seen:
+                continue
+            if not worth_asking(text, low):
+                self.seen.add(seg_id)
                 continue
             if not HEAVY_LOCK.acquire(timeout=10):
                 return False  # transcription is busy; try again on the next step
             try:
-                pick = bool(text) and self.decide(text)
+                pick = self.decide(text)
+                sentence, frac = self.locate(text) if pick else ("", 0.0)
                 self.model_error = None
             except Exception as e:  # noqa: BLE001
                 msg = f"Auto-capture couldn't ask the local model: {e}"
@@ -177,24 +213,36 @@ class AutoCaptureWorker(Worker):
                 HEAVY_LOCK.release()
             self.seen.add(seg_id)
             if pick:
-                self._shoot(a, start_ms, st.auto_capture)
+                said_ms = start_ms + int(frac * max(0, (end_ms or start_ms) - start_ms))
+                self._shoot(a, said_ms, sentence, st.auto_capture)
         return False
 
-    def _shoot(self, a, start_ms: int, cfg) -> None:  # noqa: ANN001
-        # Map the transcript offset back to the monotonic clock the frames were stamped with.
-        mono = time.monotonic() - (a.clock.offset_ms() - start_ms) / 1000
-        if mono - self.last_shot < cfg.cooldown_s or self.count >= cfg.max_per_session:
+    def _manual_nearby(self, session_id: str, at_ms: int) -> bool:
+        with read_session() as s:
+            return s.scalars(select(Capture.id).where(
+                Capture.session_id == session_id, Capture.trigger != "auto", Capture.status != "discarded",
+                Capture.offset_ms.between(at_ms - MANUAL_NEARBY_S * 1000, at_ms + MANUAL_NEARBY_S * 1000))).first() is not None
+
+    def _shoot(self, a, said_ms: int, sentence: str, cfg) -> None:  # noqa: ANN001
+        at_ms = said_ms - int(cfg.lead_s * 1000)
+        if self.count >= cfg.max_per_session:
             return
+        if self.last_shot_ms is not None and abs(at_ms - self.last_shot_ms) < cfg.cooldown_s * 1000:
+            return
+        if self._manual_nearby(a.id, at_ms):
+            return
+        # Map the transcript offset back to the monotonic clock the frames were stamped with.
+        mono = time.monotonic() - (a.clock.offset_ms() - at_ms) / 1000
         frame = self.frames.nearest(mono, max(3.0, cfg.frame_interval_s * 1.5))
         if frame is None:
             return
         try:
-            self.capture.auto_capture(frame)
+            self.capture.auto_capture(frame, reason=sentence)
         except Exception:  # noqa: BLE001
             log.exception("Saving an auto screenshot failed")
             return
         self.count += 1
-        self.last_shot = mono
+        self.last_shot_ms = at_ms
 
     def status(self) -> dict:
         return {"alive": self.alive, "enabled": get_settings().auto_capture.enabled, "state": self.state, "count": self.count,

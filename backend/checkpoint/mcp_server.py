@@ -58,7 +58,7 @@ def get_handoff(handoff: str = "latest") -> list:
         recent = ho.list_recent(5)
         hint = ", ".join(f"{r['code']} ({r['title']})" for r in recent) or "none yet"
         return [f"No Checkpoint handoff matches “{handoff}”. Recent handoffs: {hint}. "
-                "The user creates one with “Send to AI” in Checkpoint → Project items."]
+                "The user creates one with “Send to AI” in Checkpoint → Items."]
     b = ho.bundle_for(h)
     ho.mark_fetched(h.id)
     return _bundle_content(b)

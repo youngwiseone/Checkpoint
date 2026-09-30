@@ -251,7 +251,7 @@ class Toast(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(14, self.height() // 2 - 5, 10, 10)
 
-    def show_message(self, level: str, message: str, work: Optional[dict] = None) -> None:
+    def show_message(self, level: str, message: str, work: Optional[dict] = None, duration_ms: Optional[int] = None) -> None:
         self.level = level
         self.label.setText(message)
         self.label.setStyleSheet(f"color:{TEXT};")
@@ -268,4 +268,4 @@ class Toast(QWidget):
         self.show()
         win32.exclude_from_capture(int(self.winId()))
         self.update()
-        self.timer.start(2600 if level != "error" else 6000)
+        self.timer.start(duration_ms or (2600 if level != "error" else 6000))

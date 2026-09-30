@@ -10,11 +10,14 @@ from pydantic import BaseModel, Field
 from .db import read_session, write_session
 from .models import Setting
 
+SETTINGS_VERSION = 2
+
 
 class HotkeySettings(BaseModel):
     capture: str = "F8"
     capture_context: str = "Shift+F8"
     quick_note: str = "F9"
+    start_session: str = "Ctrl+F8"  # start a session (the offered project, else the last one); press twice quickly to end
 
 
 class CaptureSettings(BaseModel):
@@ -62,11 +65,26 @@ class AutoCaptureSettings(BaseModel):
     # A System One (Jev-style) decision model reads the live transcript and decides when a screenshot is worth taking.
     enabled: bool = False
     model: str = "tev1:0.8b"
-    threshold: float = 0.5  # capture when the model's probability is at least this
+    # On real playtest transcripts tev1:0.8b scores ordinary chatter around 0.5 and clear problem reports 0.7+.
+    threshold: float = 0.7  # capture when the model's probability is at least this
     frame_interval_s: float = 2.0
     buffer_seconds: int = 90
-    cooldown_s: int = 15
-    max_per_session: int = 40
+    cooldown_s: int = 45
+    max_per_session: int = 25
+    lead_s: float = 1.5  # people describe what they've just seen: take the frame this long before the remark
+
+
+class WatchRule(BaseModel):
+    project_id: str
+    # exe: a running program's exe name (with or without .exe); title: part of a visible window title.
+    kind: Literal["exe", "title"] = "exe"
+    match: str = Field(min_length=1, max_length=200)
+
+
+class AppWatchSettings(BaseModel):
+    # When a project's program appears, offer to start a session for it (tray + toast, start with the hotkey).
+    enabled: bool = True
+    rules: list[WatchRule] = Field(default_factory=list)
 
 
 class SharingSettings(BaseModel):
@@ -83,8 +101,25 @@ class AppSettings(BaseModel):
     transcription: TranscriptionSettings = Field(default_factory=TranscriptionSettings)
     ai: AISettings = Field(default_factory=AISettings)
     auto_capture: AutoCaptureSettings = Field(default_factory=AutoCaptureSettings)
+    app_watch: AppWatchSettings = Field(default_factory=AppWatchSettings)
     sharing: SharingSettings = Field(default_factory=SharingSettings)
     last_project_id: Optional[str] = None
+    version: int = SETTINGS_VERSION
+
+
+def _upgrade(value: dict) -> dict:
+    """Stored settings keep every value, so improved defaults only reach users still on the old ones."""
+    if value.get("version", 1) < 2:
+        ac = value.setdefault("auto_capture", {})
+        for k, old, new in (("threshold", 0.5, 0.7), ("cooldown_s", 15, 45), ("max_per_session", 40, 25)):
+            if ac.get(k, old) == old:
+                ac[k] = new
+    value["version"] = SETTINGS_VERSION
+    return value
+
+
+def _load(row) -> AppSettings:  # noqa: ANN001
+    return AppSettings.model_validate(_upgrade(dict(row.value))) if row else AppSettings()
 
 
 _KEY = "app"
@@ -98,7 +133,7 @@ def get_settings() -> AppSettings:
         if _cache is None:
             with read_session() as s:
                 row = s.get(Setting, _KEY)
-                _cache = AppSettings.model_validate(row.value) if row else AppSettings()
+                _cache = _load(row)
         return _cache.model_copy(deep=True)
 
 
@@ -119,7 +154,7 @@ def update_settings(patch: dict[str, Any]) -> AppSettings:
         if current is None:
             with read_session() as s:
                 row = s.get(Setting, _KEY)
-                current = AppSettings.model_validate(row.value).model_dump() if row else AppSettings().model_dump()
+                current = _load(row).model_dump()
         merged = AppSettings.model_validate(_deep_merge(current, patch))
         with write_session() as s:
             row = s.get(Setting, _KEY)

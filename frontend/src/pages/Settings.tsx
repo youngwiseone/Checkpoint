@@ -31,7 +31,7 @@ function Shortcuts({ s }: { s: Settings }) {
   const { data: state } = useAppState();
   const toast = useToast();
   const bindings = state?.desktop.hotkeys.bindings ?? [];
-  const labels: Record<string, string> = { capture: "Capture screenshot", capture_context: "Screenshot + always ask for a note", quick_note: "Text-only quick note" };
+  const labels: Record<string, string> = { capture: "Capture screenshot", capture_context: "Screenshot + always ask for a note", quick_note: "Text-only quick note", start_session: "Start session (press twice to end)" };
   const save = () => patch.mutate({ hotkeys: hk }, {
     onSuccess: (r) => {
       if (r.hotkeys && !r.hotkeys.ok) toast("warning", `Some shortcuts couldn't be registered: ${r.hotkeys.reason}`);
@@ -44,7 +44,7 @@ function Shortcuts({ s }: { s: Settings }) {
         <h3>Global shortcuts</h3>
         <p className="text-2 small">Registered with Windows so they work in games and other apps. Use F-keys, or combine a key with Ctrl/Alt/Shift (e.g. <code>Ctrl+Alt+S</code>).</p>
         {!state?.desktop.available && <Banner kind="warn">The desktop helper isn't running, so shortcuts aren't active. Launch with <code>start.cmd</code>.</Banner>}
-        {(["capture", "capture_context", "quick_note"] as const).map((k) => {
+        {(["capture", "capture_context", "quick_note", "start_session"] as const).map((k) => {
           const b = bindings.find((x) => x.action === k);
           return (
             <div key={k} className="row">
@@ -218,8 +218,8 @@ function AutoCapture({ s, installed, onPull, pulls }: { s: Settings; installed: 
           </div>
           <span className="hint">Needs a System One model (Nimble or Tev). tev1:0.8b (~900 MB) decides in under 0.1 s once loaded.</span></div>
         <div className="field"><label htmlFor="acthr">Sensitivity</label>
-          <input id="acthr" type="number" min={0.05} max={0.95} step={0.05} className="input" defaultValue={a.threshold} onBlur={(e) => patch.mutate({ auto_capture: { threshold: Math.max(0.05, Math.min(0.95, Number(e.target.value) || 0.5)) } })} />
-          <span className="hint">Take a screenshot when the model is at least this sure (0–1). Lower catches more.</span></div>
+          <input id="acthr" type="number" min={0.05} max={0.95} step={0.05} className="input" defaultValue={a.threshold} onBlur={(e) => patch.mutate({ auto_capture: { threshold: Math.max(0.05, Math.min(0.95, Number(e.target.value) || 0.7)) } })} />
+          <span className="hint">Take a screenshot when the model is at least this sure (0–1). Ordinary chatter scores around 0.5 and clear problem reports 0.7+, so below 0.6 it fires on almost everything.</span></div>
         <div className="field"><label htmlFor="accool">Minimum gap between auto screenshots (s)</label>
           <input id="accool" type="number" min={0} className="input" defaultValue={a.cooldown_s} onBlur={(e) => patch.mutate({ auto_capture: { cooldown_s: Math.max(0, Number(e.target.value) || 0) } })} /></div>
       </div>
@@ -360,7 +360,7 @@ function Assistants() {
       <div className="card stack">
         <h3>AI assistants</h3>
         <p className="text-2 small">
-          Connect Claude Desktop or Codex once. Then use <b>Send to AI</b> in Project items: it copies a short prompt, and the assistant
+          Connect Claude Desktop or Codex once. Then tick items in <b>Items</b> and press <b>Send to Claude / Codex</b>: it copies a short prompt, and the assistant
           fetches the items, notes and screenshots from Checkpoint on this PC. The connector is read-only, makes no network requests and
           never exposes audio or full transcripts. You can also ask the assistant things like “list my open Checkpoint bugs”.
         </p>

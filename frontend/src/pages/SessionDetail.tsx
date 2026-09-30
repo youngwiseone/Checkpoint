@@ -313,7 +313,7 @@ function DangerZone({ d }: { d: SD }) {
           ) : (
             <div className="stack">
               <p>Deletes the session's {i.captures} screenshot(s), notes, transcript, {fmtBytes(i.audio_bytes)} of audio and {i.pending_cards} pending card(s).</p>
-              <p><b>{i.approved_items} approved item(s) are kept</b> in Project items.</p>
+              <p><b>{i.approved_items} approved item(s) are kept</b> in Items.</p>
               {i.items_using_screenshots > 0 && <Banner kind="warn">{i.items_using_screenshots} approved item(s) use screenshots or quotes from this session — they will lose that evidence.</Banner>}
             </div>
           )}
@@ -339,7 +339,7 @@ export default function SessionDetail() {
   if (d.error || !d.data) return <div className="page"><Banner kind="error">{(d.error as Error)?.message ?? "Session not found"}</Banner></div>;
   const s = d.data;
   if (s.state === "active" || s.state === "paused") {
-    return <div className="page"><Banner kind="info" action={<Link to="/session" className="btn sm">Open</Link>}>This session is running.</Banner></div>;
+    return <div className="page"><Banner kind="info" action={<Link to="/" className="btn sm">Open</Link>}>This session is running.</Banner></div>;
   }
   const toggle = (iid: string) => setSel((x) => { const n = new Set(x); if (n.has(iid)) n.delete(iid); else n.add(iid); return n; });
   return (

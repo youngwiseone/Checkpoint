@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Search, Share2, RefreshCw, Plus, X, Image as ImageIcon, CloudOff, RotateCw, Bot } from "lucide-react";
+import { Download, Search, Share2, RefreshCw, Plus, X, Image as ImageIcon, CloudOff, RotateCw, Bot, Check } from "lucide-react";
 import SendToAIModal from "../components/SendToAI";
 import { api, download, qs } from "../api";
 import type { ItemType, SessionSummary, WorkItem, WorkStatus } from "../types";
 import {
   Banner, Empty, Lightbox, Modal, SaveIndicator, ShareBadge, Spinner, TYPES, TYPE_LABEL, TypeBadge, WORK_LABEL, WORK_STATUSES, fmtDate, fmtOffset, useAutosave, useToast,
 } from "../components/ui";
-import { useProjects } from "../state";
+import { useCurrentProject } from "../state";
+import Review from "./Review";
 
 type ShareStatus = { server_url: string; display_name: string; token_saved: boolean; outbox: Record<string, number>; offline_reason: string | null };
 
@@ -142,7 +143,7 @@ function PublishModal({ ids, onClose }: { ids: string[]; onClose: () => void }) 
       {!pv.data ? <Spinner /> : (
         <div className="stack">
           <p>Destination: <b>{dest ?? "—"}</b> on <code>{pv.data.server_url || "no server configured"}</code>{pv.data.display_name ? <> · shown as <b>{pv.data.display_name}</b></> : null}</p>
-          {blocked.length > 0 && <Banner kind="error">{blocked.length} item(s) belong to a local-only project. Link the project to a shared project first (Project items → Sharing). Nothing from local-only projects is ever uploaded.</Banner>}
+          {blocked.length > 0 && <Banner kind="error">{blocked.length} item(s) belong to a local-only project. Link the project to a shared project first (Settings → Sharing). Nothing from local-only projects is ever uploaded.</Banner>}
           <div className="row wrap" style={{ gap: 20 }}>
             <label className="check"><input type="checkbox" checked={shots} onChange={(e) => setShots(e.target.checked)} /> Include screenshots</label>
             <label className="check"><input type="checkbox" checked={excerpts} onChange={(e) => setExcerpts(e.target.checked)} /> Include linked transcript/note excerpts</label>
@@ -206,31 +207,46 @@ function NewItemModal({ projectId, onClose }: { projectId: string; onClose: () =
   );
 }
 
+type ItemsTab = "review" | "open" | "done" | "all";
+const TAB_STATUSES: Record<Exclude<ItemsTab, "review">, WorkStatus[]> = { open: ["open", "in_progress"], done: ["done", "wont_do"], all: [] };
+
 export default function Items() {
   const [params, setParams] = useSearchParams();
-  const { data: projects } = useProjects();
-  const projectId = params.get("project") ?? projects?.[0]?.id ?? "";
-  const project = projects?.find((p) => p.id === projectId);
+  const [project, setProject] = useCurrentProject();
+  const projectId = project?.id ?? "";
+  const tab = (params.get("tab") as ItemsTab | null) ?? "open";
+  const setTab = (t: ItemsTab) => { const n = new URLSearchParams(params); n.set("tab", t); if (t !== "review") n.delete("session"); setParams(n); };
   const [search, setSearch] = useState("");
   const [types, setTypes] = useState<ItemType[]>([]);
-  const [statuses, setStatuses] = useState<WorkStatus[]>(["open", "in_progress"]);
   const [sessionId, setSessionId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [anchor, setAnchor] = useState<number | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [modal, setModal] = useState<"publish" | "export" | "new" | "ai" | null>(null);
+  const [aiIds, setAiIds] = useState<string[]>([]);
   const qc = useQueryClient();
   const toast = useToast();
+  useEffect(() => {
+    const p = params.get("project");
+    if (p) { setProject(p); const n = new URLSearchParams(params); n.delete("project"); setParams(n, { replace: true }); }
+  }, [params, setParams, setProject]);
+  const statuses = tab === "review" ? [] : TAB_STATUSES[tab];
   const items = useQuery({
     queryKey: ["items", projectId, search, types, statuses, sessionId],
     queryFn: () => api.get<WorkItem[]>(`/api/items${qs({ project_id: projectId, q: search, type: types, status: statuses, session_id: sessionId })}`),
-    enabled: !!projectId,
+    enabled: !!projectId && tab !== "review",
     refetchInterval: 5000,
   });
+  const reviewCount = useQuery({
+    queryKey: ["counts", projectId],
+    queryFn: () => api.get<{ pending: number }>(`/api/review/counts${qs({ project_id: projectId })}`),
+    enabled: !!projectId, refetchInterval: 5000,
+  });
   const sessions = useQuery({ queryKey: ["sessions", projectId], queryFn: () => api.get<SessionSummary[]>(`/api/sessions${qs({ project_id: projectId })}`), enabled: !!projectId });
-  const share = useQuery({ queryKey: ["share-status"], queryFn: () => api.get<ShareStatus>("/api/share/status"), refetchInterval: 5000 });
+  const share = useQuery({ queryKey: ["share-status"], queryFn: () => api.get<ShareStatus>("/api/share/status"), refetchInterval: 5000, enabled: !!project?.shared_project_id });
   const updateStatus = useMutation({
-    mutationFn: ({ id, work_status }: { id: string; work_status: WorkStatus }) => api.patch(`/api/items/${id}`, { work_status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["items"] }),
+    mutationFn: ({ ids, work_status }: { ids: string[]; work_status: WorkStatus }) => Promise.all(ids.map((id) => api.patch(`/api/items/${id}`, { work_status }))),
+    onSuccess: (_r, v) => { qc.invalidateQueries({ queryKey: ["items"] }); if (v.ids.length > 1) { toast("success", `${v.ids.length} items marked ${WORK_LABEL[v.work_status]}`); setSelected(new Set()); } },
     onError: (e: Error) => toast("error", e.message),
   });
   const refresh = useMutation({
@@ -239,107 +255,140 @@ export default function Items() {
     onError: (e: Error) => toast("error", e.message),
   });
   const retry = useMutation({ mutationFn: () => api.post<{ requeued: number }>("/api/share/retry"), onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["items"] }); toast("info", `Retrying ${r.requeued} item(s)`); } });
-  useEffect(() => setSelected(new Set()), [projectId]);
+  useEffect(() => { setSelected(new Set()); setAnchor(null); }, [projectId, tab]);
   const list = useMemo(() => items.data ?? [], [items.data]);
   const toggleIn = <T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const allSelected = list.length > 0 && list.every((i) => selected.has(i.id));
   const failed = share.data?.outbox.failed ?? 0;
   const pending = share.data?.outbox.pending ?? 0;
+  const ids = [...selected];
+
+  // Click selects one; Shift+click selects the whole range from the last click.
+  const pick = (index: number, shift: boolean) => {
+    const id = list[index].id;
+    setSelected((cur) => {
+      const n = new Set(cur);
+      if (shift && anchor != null) {
+        const on = !cur.has(id) || cur.has(list[anchor]?.id);
+        for (let k = Math.min(anchor, index); k <= Math.max(anchor, index); k++) {
+          if (on) n.add(list[k].id); else n.delete(list[k].id);
+        }
+      } else if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+    setAnchor(index);
+  };
+  const sendToAI = (which: string[]) => { setAiIds(which); setModal("ai"); };
+  const pendingReview = reviewCount.data?.pending ?? 0;
+
+  if (!project) return <div className="page"><Empty title="No project yet">Create a project from the sidebar first.</Empty></div>;
 
   return (
     <div className="page wide">
       <div className="page-head">
         <div className="grow">
-          <h1>Project items</h1>
-          <p>Approved work, tracked locally{project?.shared_project_id ? " and shared with your team" : ""}.</p>
+          <h1>Items</h1>
+          <p>{project.name}{project.shared_project_id ? " · shared with your team" : ""}</p>
         </div>
-        <select className="select" style={{ width: 260 }} value={projectId} onChange={(e) => setParams({ project: e.target.value })} aria-label="Project">
-          {projects?.map((p) => <option key={p.id} value={p.id}>{p.name}{p.is_demo ? " (demo)" : ""}</option>)}
-        </select>
-        <button className="btn" onClick={() => setModal("new")} disabled={!projectId}><Plus size={15} /> New item</button>
+        <button className="btn" onClick={() => setModal("new")}><Plus size={15} /> New item</button>
       </div>
 
-      {project?.shared_project_id ? (
-        <div className="card tight row wrap" style={{ marginBottom: 16 }}>
-          <Share2 size={16} className="muted" /><span className="grow">Shared as <b>{project.shared_project_name}</b>{project.last_refreshed_at ? ` · refreshed ${fmtDate(project.last_refreshed_at)}` : ""}</span>
-          {share.data?.offline_reason && <span className="row small" style={{ color: "var(--warn)" }}><CloudOff size={14} /> {share.data.offline_reason} Saved locally — waiting to sync.</span>}
-          {pending > 0 && !share.data?.offline_reason && <span className="small text-2">{pending} waiting to sync</span>}
-          {failed > 0 && <button className="btn sm" onClick={() => retry.mutate()}><RotateCw size={14} /> Retry {failed} failed</button>}
-          <button className="btn sm" onClick={() => refresh.mutate()} disabled={refresh.isPending}><RefreshCw size={14} /> {refresh.isPending ? "Refreshing…" : "Refresh from server"}</button>
-        </div>
-      ) : project && !project.is_demo ? (
-        <p className="muted small" style={{ marginBottom: 12 }}>Local-only project. To share with a team, configure a server in Settings → Sharing and link this project there.</p>
-      ) : null}
+      <div className="tabs" role="tablist">
+        {([["review", "To review"], ["open", "Open"], ["done", "Done"], ["all", "All"]] as [ItemsTab, string][]).map(([t, label]) => (
+          <button key={t} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
+            {label}{t === "review" && pendingReview > 0 && <span className="badge accent" style={{ marginLeft: 6 }}>{pendingReview}</span>}
+          </button>
+        ))}
+      </div>
 
-      <div className="card tight" style={{ marginBottom: 14 }}>
-        <div className="row wrap" style={{ gap: 12 }}>
-          <div className="row" style={{ flex: "1 1 260px" }}>
-            <Search size={16} className="muted" />
-            <input className="input" placeholder="Search titles and descriptions" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search items" />
+      {tab === "review" ? <Review projectId={projectId} embedded /> : <>
+        {project.shared_project_id && (
+          <div className="card tight row wrap" style={{ marginBottom: 14 }}>
+            <Share2 size={16} className="muted" /><span className="grow">Shared as <b>{project.shared_project_name}</b>{project.last_refreshed_at ? ` · refreshed ${fmtDate(project.last_refreshed_at)}` : ""}</span>
+            {share.data?.offline_reason && <span className="row small" style={{ color: "var(--warn)" }}><CloudOff size={14} /> {share.data.offline_reason} Saved locally — waiting to sync.</span>}
+            {pending > 0 && !share.data?.offline_reason && <span className="small text-2">{pending} waiting to sync</span>}
+            {failed > 0 && <button className="btn sm" onClick={() => retry.mutate()}><RotateCw size={14} /> Retry {failed} failed</button>}
+            <button className="btn sm" onClick={() => refresh.mutate()} disabled={refresh.isPending}><RefreshCw size={14} /> {refresh.isPending ? "Refreshing…" : "Refresh from server"}</button>
           </div>
-          <select className="select" style={{ width: 240 }} value={sessionId} onChange={(e) => setSessionId(e.target.value)} aria-label="Session">
+        )}
+
+        <div className="row wrap" style={{ gap: 10, marginBottom: 12 }}>
+          <div className="row" style={{ flex: "1 1 240px" }}>
+            <Search size={16} className="muted" />
+            <input className="input" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search items" />
+          </div>
+          <div className="row wrap" style={{ gap: 4 }}>
+            {TYPES.map((t) => <button key={t} className={`badge ${types.includes(t) ? `type-${t}` : "outline"}`} style={{ cursor: "pointer" }} aria-pressed={types.includes(t)} onClick={() => setTypes((x) => toggleIn(x, t))}>{TYPE_LABEL[t]}</button>)}
+          </div>
+          <select className="select" style={{ width: 210 }} value={sessionId} onChange={(e) => setSessionId(e.target.value)} aria-label="Session">
             <option value="">All sessions</option>
             {sessions.data?.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
         </div>
-        <div className="row wrap" style={{ marginTop: 10, gap: 6 }}>
-          <span className="small muted">Type</span>
-          {TYPES.map((t) => <button key={t} className={`badge ${types.includes(t) ? `type-${t}` : "outline"}`} style={{ cursor: "pointer" }} aria-pressed={types.includes(t)} onClick={() => setTypes((x) => toggleIn(x, t))}>{TYPE_LABEL[t]}</button>)}
-          <span className="small muted" style={{ marginLeft: 12 }}>Status</span>
-          {WORK_STATUSES.map((s) => <button key={s} className={`badge ${statuses.includes(s) ? "accent" : "outline"}`} style={{ cursor: "pointer" }} aria-pressed={statuses.includes(s)} onClick={() => setStatuses((x) => toggleIn(x, s))}>{WORK_LABEL[s]}</button>)}
-        </div>
-      </div>
 
-      {selected.size > 0 && (
-        <div className="row" style={{ marginBottom: 10 }}>
-          <b>{selected.size} selected</b>
-          <button className="btn sm primary" onClick={() => setModal("ai")}><Bot size={14} /> Send to AI…</button>
-          <button className="btn sm" onClick={() => setModal("export")}><Download size={14} /> Export…</button>
-          {project?.shared_project_id && <button className="btn sm" onClick={() => setModal("publish")}><Share2 size={14} /> Publish…</button>}
-          <button className="btn sm ghost" onClick={() => setSelected(new Set())}>Clear</button>
-        </div>
-      )}
+        {selected.size > 0 ? (
+          <div className="sel-bar row wrap">
+            <b>{selected.size} selected</b>
+            <button className="btn sm primary" onClick={() => sendToAI(ids)}><Bot size={14} /> Send to Claude / Codex</button>
+            {tab !== "done" && <button className="btn sm" onClick={() => updateStatus.mutate({ ids, work_status: "done" })}><Check size={14} /> Mark done</button>}
+            {tab === "open" && <button className="btn sm" onClick={() => updateStatus.mutate({ ids, work_status: "in_progress" })}>In progress</button>}
+            {tab !== "open" && <button className="btn sm" onClick={() => updateStatus.mutate({ ids, work_status: "open" })}>Reopen</button>}
+            <button className="btn sm" onClick={() => setModal("export")}><Download size={14} /> Export</button>
+            {project.shared_project_id && <button className="btn sm" onClick={() => setModal("publish")}><Share2 size={14} /> Publish</button>}
+            <span className="spacer" />
+            <button className="btn sm ghost" onClick={() => setSelected(new Set())}>Clear</button>
+          </div>
+        ) : list.length > 0 && (
+          <div className="sel-bar idle row wrap small text-2">
+            <span className="grow">Tick items to act on them — <kbd>Shift</kbd>+click selects a range.</span>
+            <button className="btn sm" onClick={() => sendToAI(list.map((i) => i.id))}><Bot size={14} /> Send all {list.length} to Claude / Codex</button>
+          </div>
+        )}
 
-      {items.isLoading ? <Spinner /> : !list.length ? (
-        <div className="card"><Empty title="No items match">Approve cards in the Review inbox, or add an item directly. Try clearing filters to see Done items.</Empty></div>
-      ) : (
-        <div className="card" style={{ padding: 0 }}>
-          <table className="table">
-            <thead><tr>
-              <th style={{ width: 36 }}><input type="checkbox" checked={allSelected} onChange={(e) => setSelected(e.target.checked ? new Set(list.map((i) => i.id)) : new Set())} aria-label="Select all" /></th>
-              <th>Item</th><th style={{ width: 150 }}>Status</th><th style={{ width: 190 }}>Sharing</th><th style={{ width: 150 }}>Updated</th>
-            </tr></thead>
-            <tbody>
-              {list.map((i) => (
-                <tr key={i.id}>
-                  <td><input type="checkbox" checked={selected.has(i.id)} onChange={() => setSelected((s) => { const n = new Set(s); if (n.has(i.id)) n.delete(i.id); else n.add(i.id); return n; })} aria-label={`Select ${i.title}`} /></td>
-                  <td>
-                    <button className="btn ghost" style={{ padding: 0, textAlign: "left", whiteSpace: "normal", justifyContent: "flex-start" }} onClick={() => setOpen(i.id)}>
-                      <span className="row wrap" style={{ gap: 8 }}><TypeBadge type={i.type} /><span style={{ fontWeight: 600, color: "var(--text)" }}>{i.title}</span>
-                        {i.capture_count > 0 && <span className="muted row small" style={{ gap: 3 }}><ImageIcon size={13} />{i.capture_count}</span>}
-                        {i.origin === "shared" && <span className="badge neutral">from {i.created_by ?? "team"}</span>}</span>
-                    </button>
-                    {i.session_title && <div className="small muted">{i.session_title}</div>}
-                  </td>
-                  <td>
-                    <select className="select" style={{ padding: "4px 26px 4px 8px", fontSize: 14 }} value={i.work_status} aria-label={`Status of ${i.title}`}
-                      onChange={(e) => updateStatus.mutate({ id: i.id, work_status: e.target.value as WorkStatus })}>
-                      {WORK_STATUSES.map((s) => <option key={s} value={s}>{WORK_LABEL[s]}</option>)}
-                    </select>
-                  </td>
-                  <td><ShareBadge state={i.sharing_state} error={i.sync_error} /></td>
-                  <td className="small muted">{fmtDate(i.updated_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+        {items.isLoading ? <Spinner /> : !list.length ? (
+          <div className="card"><Empty title={tab === "done" ? "Nothing done yet" : "No items match"}>
+            {tab === "open" && pendingReview > 0 ? <>You have <button className="btn ghost sm" onClick={() => setTab("review")}>{pendingReview} card{pendingReview === 1 ? "" : "s"} to review</button> — kept cards become items here.</> : "Kept cards from the review tab appear here, or add an item directly."}
+          </Empty></div>
+        ) : (
+          <div className="card" style={{ padding: 0 }}>
+            <table className="table">
+              <thead><tr>
+                <th style={{ width: 36 }}><input type="checkbox" checked={allSelected} onChange={(e) => setSelected(e.target.checked ? new Set(list.map((i) => i.id)) : new Set())} aria-label="Select all" /></th>
+                <th>Item</th><th style={{ width: 150 }}>Status</th>{project.shared_project_id && <th style={{ width: 170 }}>Sharing</th>}<th style={{ width: 140 }}>Updated</th>
+              </tr></thead>
+              <tbody>
+                {list.map((i, index) => (
+                  <tr key={i.id} className={selected.has(i.id) ? "selected" : ""}>
+                    <td><input type="checkbox" checked={selected.has(i.id)} onClick={(e) => pick(index, e.shiftKey)} onChange={() => {}} aria-label={`Select ${i.title}`} /></td>
+                    <td>
+                      <button className="btn ghost" style={{ padding: 0, textAlign: "left", whiteSpace: "normal", justifyContent: "flex-start" }} onClick={() => setOpen(i.id)}>
+                        <span className="row wrap" style={{ gap: 8 }}><TypeBadge type={i.type} /><span style={{ fontWeight: 600, color: "var(--text)" }}>{i.title}</span>
+                          {i.capture_count > 0 && <span className="muted row small" style={{ gap: 3 }}><ImageIcon size={13} />{i.capture_count}</span>}
+                          {i.origin === "shared" && <span className="badge neutral">from {i.created_by ?? "team"}</span>}</span>
+                      </button>
+                      {i.session_title && <div className="small muted">{i.session_title}</div>}
+                    </td>
+                    <td>
+                      <select className="select" style={{ padding: "4px 26px 4px 8px", fontSize: 14 }} value={i.work_status} aria-label={`Status of ${i.title}`}
+                        onChange={(e) => updateStatus.mutate({ ids: [i.id], work_status: e.target.value as WorkStatus })}>
+                        {WORK_STATUSES.map((s) => <option key={s} value={s}>{WORK_LABEL[s]}</option>)}
+                      </select>
+                    </td>
+                    {project.shared_project_id && <td><ShareBadge state={i.sharing_state} error={i.sync_error} /></td>}
+                    <td className="small muted">{fmtDate(i.updated_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>}
       {open && <ItemDrawer id={open} onClose={() => setOpen(null)} />}
-      {modal === "publish" && <PublishModal ids={[...selected]} onClose={() => setModal(null)} />}
-      {modal === "export" && <ExportModal ids={[...selected]} onClose={() => setModal(null)} />}
+      {modal === "publish" && <PublishModal ids={ids} onClose={() => setModal(null)} />}
+      {modal === "export" && <ExportModal ids={ids} onClose={() => setModal(null)} />}
       {modal === "new" && <NewItemModal projectId={projectId} onClose={() => setModal(null)} />}
-      {modal === "ai" && <SendToAIModal ids={[...selected]} onClose={() => setModal(null)} />}
+      {modal === "ai" && <SendToAIModal ids={aiIds} onClose={() => setModal(null)} onSent={() => setSelected(new Set())} />}
     </div>
   );
 }

@@ -221,6 +221,7 @@ class Capture(Base):
     # saved (has note or audio context) | marker (audio on, awaiting transcript) | unfinished | discarded
     status: Mapped[str] = mapped_column(String(20), default="unfinished", index=True)
     needs_context: Mapped[bool] = mapped_column(Boolean, default=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # auto screenshots: the remark that triggered it
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 

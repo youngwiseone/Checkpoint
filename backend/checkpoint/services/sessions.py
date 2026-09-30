@@ -52,6 +52,45 @@ class StartSessionRequest(BaseModel):
     always_ask_context: bool = False
 
 
+def remembered_setup(project_id: str) -> StartSessionRequest:
+    """How the next session for a project starts: like its last session (sources, devices, labels,
+    transcription, AI, screen), else like the last session of any project, else the saved defaults."""
+    from ..settings_store import get_settings
+
+    st = get_settings()
+    with read_session() as s:
+        last = s.scalars(select(Session).where(Session.project_id == project_id, Session.is_demo.is_(False))
+                         .order_by(Session.started_at.desc())).first()
+        if last is None:
+            last = s.scalars(select(Session).where(Session.is_demo.is_(False)).order_by(Session.started_at.desc())).first()
+        if last is None:
+            a = st.audio
+            mode = st.transcription.default_mode
+            return StartSessionRequest(
+                project_id=project_id,
+                mic=SourceConfig(enabled=a.mic_enabled, device=a.mic_device, label=a.mic_label),
+                loopback=SourceConfig(enabled=a.loopback_enabled, device=a.loopback_device, label=a.loopback_label),
+                transcription_mode=mode if mode != "off" else "after", ai_enabled=st.ai.enabled,
+                always_ask_context=st.capture.always_ask_context,
+            )
+        srcs = {}
+        for x in s.scalars(select(AudioSource).where(AudioSource.session_id == last.id)).all():
+            toggle = s.scalars(select(AudioEvent.kind).where(AudioEvent.source_id == x.id, AudioEvent.kind.in_(("enabled", "disabled")))
+                               .order_by(AudioEvent.offset_ms.desc())).first()
+            if toggle != "disabled":  # turned off during that session: keep it off
+                srcs[x.kind] = x
+        mode = last.transcription_mode
+        if mode == "off":  # a session without audio says nothing about the transcription preference
+            mode = st.transcription.default_mode if st.transcription.default_mode != "off" else "after"
+        cfg = {kind: SourceConfig(enabled=kind in srcs, device=(srcs[kind].device_name or None) if kind in srcs else None,
+                                  label=srcs[kind].label if kind in srcs else ("Me" if kind == "mic" else "Computer audio"))
+               for kind in ("mic", "loopback")}
+        return StartSessionRequest(
+            project_id=project_id, mic=cfg["mic"], loopback=cfg["loopback"], capture_target=last.capture_target or "foreground",
+            transcription_mode=mode, ai_enabled=last.ai_enabled and st.ai.enabled, always_ask_context=last.always_ask_context,
+        )
+
+
 @dataclass
 class ActiveSession:
     id: str
@@ -224,6 +263,75 @@ class SessionManager:
         with self._lock:
             if self.active and self.active.id == session_id:
                 self.active.transcription_mode = mode
+
+    # ------------------------------------------------------------------ live changes
+    def set_source(self, kind: str, enabled: bool, device: Optional[str] = None, label: Optional[str] = None) -> None:
+        """Turn an audio source on or off during the running session. The gap is recorded as an audio event."""
+        from ..settings_store import get_settings
+
+        if kind not in ("mic", "loopback"):
+            raise ValueError("Unknown audio source")
+        with self._lock:
+            a = self.active
+            if a is None:
+                raise ValueError("No session is running")
+            rec = a.recorders.get(kind)
+            if not enabled:
+                if rec is None:
+                    return
+                rec.stop()
+                del a.recorders[kind]
+                with write_session() as s:
+                    src = s.get(AudioSource, rec.source_id)
+                    if src:
+                        src.state = "stopped"
+                    s.add(AudioEvent(source_id=rec.source_id, kind="disabled", offset_ms=a.clock.offset_ms(),
+                                     message="Turned off during the session."))
+            else:
+                if rec is not None and device is None and label is None:
+                    return
+                if rec is not None:  # switching device or label: restart the recorder
+                    rec.stop()
+                    del a.recorders[kind]
+                with write_session() as s:
+                    src = s.scalars(select(AudioSource).where(AudioSource.session_id == a.id, AudioSource.kind == kind)).first()
+                    if src is None:
+                        src = AudioSource(session_id=a.id, kind=kind, device_name=device or "",
+                                          label=(label or ("Me" if kind == "mic" else "Computer audio"))[:100])
+                        s.add(src)
+                        s.flush()
+                    else:
+                        if device is not None:
+                            src.device_name = device
+                        if label:
+                            src.label = label[:100]
+                        s.add(AudioEvent(source_id=src.id, kind="enabled", offset_ms=a.clock.offset_ms(),
+                                         message="Turned on during the session."))
+                    src.state = "starting"
+                    sess = s.get(Session, a.id)
+                    if sess.transcription_mode == "off":
+                        mode = get_settings().transcription.default_mode
+                        sess.transcription_mode = a.transcription_mode = mode if mode != "off" else "after"
+                    source_id, dev, lab = src.id, src.device_name or None, src.label
+                r = self._make_recorder(a, source_id, kind, dev, lab)
+                a.recorders[kind] = r
+                r.start()
+                if a.paused:
+                    r.pause()
+        hooks.emit_state()
+
+    def set_options(self, always_ask_context: Optional[bool] = None, capture_target: Optional[str] = None) -> None:
+        with self._lock:
+            a = self.active
+            if a is None:
+                raise ValueError("No session is running")
+            with write_session() as s:
+                sess = s.get(Session, a.id)
+                if always_ask_context is not None:
+                    sess.always_ask_context = a.always_ask_context = always_ask_context
+                if capture_target:
+                    sess.capture_target = a.capture_target = capture_target
+        hooks.emit_state()
 
     # ------------------------------------------------------------------ heartbeat & recovery
     def _start_heartbeat(self) -> None:

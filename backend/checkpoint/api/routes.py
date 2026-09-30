@@ -351,6 +351,87 @@ def session_action(action: str) -> dict:
     return sm.status()
 
 
+class QuickStartIn(BaseModel):
+    project_id: Optional[str] = None
+
+
+@router.post("/sessions/quick")
+def quick_start(body: QuickStartIn) -> dict:
+    try:
+        sid = core().quick_start(body.project_id)
+    except ValueError as e:
+        raise _bad(e) from e
+    return {"session_id": sid}
+
+
+@router.get("/projects/{pid}/setup")
+def project_setup(pid: str) -> dict:
+    """What a quick start for this project would record (its last session's choices)."""
+    from ..services.sessions import remembered_setup
+
+    return remembered_setup(pid).model_dump()
+
+
+class SourceToggle(BaseModel):
+    enabled: bool
+    device: Optional[str] = None
+    label: Optional[str] = Field(default=None, max_length=100)
+
+
+class ActivePatch(BaseModel):
+    mic: Optional[SourceToggle] = None
+    loopback: Optional[SourceToggle] = None
+    transcription_mode: Optional[str] = None
+    always_ask_context: Optional[bool] = None
+    capture_target: Optional[str] = None
+    auto_capture: Optional[bool] = None
+
+
+@router.patch("/sessions/active")
+def patch_active(body: ActivePatch) -> dict:
+    """Change what is being recorded while the session runs."""
+    sm = core().sessions
+    a = sm.active
+    if a is None:
+        raise HTTPException(409, "No session is running")
+    try:
+        for kind in ("mic", "loopback"):
+            t = getattr(body, kind)
+            if t is not None:
+                sm.set_source(kind, t.enabled, t.device, t.label)
+        if body.transcription_mode:
+            sm.set_transcription_mode(a.id, body.transcription_mode)
+            core().transcriber.wake()
+        if body.always_ask_context is not None or body.capture_target:
+            sm.set_options(body.always_ask_context, body.capture_target)
+    except ValueError as e:
+        raise _bad(e) from e
+    if body.auto_capture is not None:
+        update_settings({"auto_capture": {"enabled": body.auto_capture}})
+        core().autocapture.wake()
+    return sm.status()
+
+
+@router.get("/running-apps")
+def running_apps() -> list[dict]:
+    """Programs with a visible window, for picking which one starts a project's session."""
+    from ..capture.win32 import visible_windows
+
+    seen, out = set(), []
+    for w in visible_windows():
+        key = (w["exe"].lower(), w["title"])
+        if w["exe"] and key not in seen:
+            seen.add(key)
+            out.append({"exe": w["exe"], "title": w["title"]})
+    return sorted(out, key=lambda w: (w["exe"].lower(), w["title"].lower()))
+
+
+@router.post("/offer/dismiss")
+def dismiss_offer() -> dict:
+    core().appwatch.dismiss()
+    return {"ok": True}
+
+
 @router.post("/sessions/active/sources/{kind}/retry")
 def retry_source(kind: str) -> dict:
     core().sessions.retry_source(kind)
@@ -442,6 +523,7 @@ def timeline(sid: str) -> dict:
                         "category": n.category})
         for c in s.scalars(select(Capture).where(Capture.session_id == sid, Capture.status != "discarded")).all():
             out.append({"kind": "capture", "id": c.id, "offset_ms": c.offset_ms, "status": c.status, "window_title": c.window_title,
+                        "trigger": c.trigger, "reason": c.reason,
                         "thumb_url": f"/api/media/captures/{c.id}/thumb", "image_url": f"/api/media/captures/{c.id}/image",
                         "context_state": capture_context_state(x, c, st.window_before_s, st.window_after_s, s)})
         for p in s.scalars(select(SessionPause).where(SessionPause.session_id == sid)).all():
@@ -584,7 +666,7 @@ class NoteIn(BaseModel):
 
 def capture_dict(c: Capture) -> dict:
     return {"id": c.id, "session_id": c.session_id, "project_id": c.project_id, "offset_ms": c.offset_ms, "taken_at": _iso(c.taken_at),
-            "status": c.status, "trigger": c.trigger, "window_title": c.window_title, "width": c.width, "height": c.height,
+            "status": c.status, "trigger": c.trigger, "reason": c.reason, "window_title": c.window_title, "width": c.width, "height": c.height,
             "thumb_url": f"/api/media/captures/{c.id}/thumb", "image_url": f"/api/media/captures/{c.id}/image"}
 
 
@@ -1240,7 +1322,7 @@ def ai_copy(body: HandoffIn) -> dict:
     from ..services import handoff as ho
 
     try:
-        b = ho.build(body.ids, False, body.include_excerpts, instruction=ho.task_text(body.mode, body.instruction, ho.item_types(body.ids)))
+        b = ho.build(body.ids, False, body.include_excerpts, instruction=ho.task_text(body.mode, body.instruction, ho.item_types(body.ids), len(set(body.ids))))
     except ValueError as e:
         raise _bad(e) from e
     return {"markdown": b.markdown}

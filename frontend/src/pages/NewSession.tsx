@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mic, MonitorSpeaker, Plus, X, Play, Save, Info, Monitor } from "lucide-react";
+import { Mic, MonitorSpeaker, Plus, X, Play, Info, Monitor } from "lucide-react";
 import { api, qs } from "../api";
-import type { AudioDevices, Settings, WorkItem } from "../types";
+import type { AudioDevices, SessionSetup, Settings, WorkItem } from "../types";
 import { Banner, Meter, Spinner, Toggle, TypeBadge, useToast } from "../components/ui";
 import { useAppState, useProjects } from "../state";
 import { ProjectModal } from "./Home";
@@ -122,19 +122,25 @@ export default function NewSession() {
 
   useEffect(() => {
     const s = settings.data;
-    if (!s || loaded) return;
-    setMic(s.audio.mic_enabled);
-    setMicDev(s.audio.mic_device ?? "");
-    setMicLabel(s.audio.mic_label || "Me");
-    setLoop(s.audio.loopback_enabled);
-    setLoopDev(s.audio.loopback_device ?? "");
-    setLoopLabel(s.audio.loopback_label || "Computer audio");
-    setMode(s.transcription.default_mode === "live" ? "live" : "after");
-    setAi(s.ai.enabled);
-    setAskAlways(s.capture.always_ask_context);
-    if (!projectId && s.last_project_id) setProjectId(s.last_project_id);
+    if (s && !projectId && s.last_project_id) setProjectId(s.last_project_id);
+  }, [settings.data, projectId]);
+  // Start from how this project's last session was set up.
+  const setup = useQuery({ queryKey: ["setup", projectId], queryFn: () => api.get<SessionSetup>(`/api/projects/${projectId}/setup`), enabled: !!projectId && !loaded });
+  useEffect(() => {
+    const x = setup.data;
+    if (!x || loaded) return;
+    setMic(x.mic.enabled);
+    setMicDev(x.mic.device ?? "");
+    setMicLabel(x.mic.label || "Me");
+    setLoop(x.loopback.enabled);
+    setLoopDev(x.loopback.device ?? "");
+    setLoopLabel(x.loopback.label || "Computer audio");
+    setMode(x.transcription_mode === "live" ? "live" : "after");
+    setAi(x.ai_enabled);
+    setAskAlways(x.always_ask_context);
+    setTarget(x.capture_target || "foreground");
     setLoaded(true);
-  }, [settings.data, loaded, projectId]);
+  }, [setup.data, loaded]);
 
   const realProjects = (projects ?? []).filter((p) => !p.is_demo && !p.archived);
   useEffect(() => {
@@ -145,12 +151,6 @@ export default function NewSession() {
     queryKey: ["items", projectId, "open"],
     queryFn: () => api.get<WorkItem[]>(`/api/items${qs({ project_id: projectId, status: ["open", "in_progress"] })}`),
     enabled: !!projectId && !resumeId,
-  });
-
-  const rememberAudio = useMutation({
-    mutationFn: () => api.patch("/api/settings", { audio: { mic_enabled: mic, mic_device: micDev || null, mic_label: micLabel, loopback_enabled: loop, loopback_device: loopDev || null, loopback_label: loopLabel } }),
-    onSuccess: () => toast("success", "Audio choices remembered for next time. You'll still see them here before each session."),
-    onError: (e: Error) => toast("error", e.message),
   });
 
   const start = useMutation({
@@ -164,7 +164,7 @@ export default function NewSession() {
     },
     onSuccess: () => {
       qc.invalidateQueries();
-      nav("/session");
+      nav("/");
     },
     onError: (e: Error) => toast("error", e.message),
   });
@@ -179,10 +179,10 @@ export default function NewSession() {
 
   if (state?.session.active) {
     return (
-      <div className="page"><Banner kind="info" action={<button className="btn sm" onClick={() => nav("/session")}>Open it</button>}>A session is already running. End it before starting another.</Banner></div>
+      <div className="page"><Banner kind="info" action={<button className="btn sm" onClick={() => nav("/")}>Open it</button>}>A session is already running. End it before starting another.</Banner></div>
     );
   }
-  if (settings.isLoading || !loaded) return <div className="page"><Spinner label="Loading…" /></div>;
+  if (settings.isLoading || (!loaded && !!projectId && !resumeId)) return <div className="page"><Spinner label="Loading…" /></div>;
 
   const recordingSummary = [mic && `Microphone (${micLabel || "Me"})`, loop && `Computer audio (${loopLabel || "Computer audio"})`].filter(Boolean).join(" and ");
 
@@ -191,7 +191,7 @@ export default function NewSession() {
       <div className="page-head">
         <div className="grow">
           <h1>{resumeId ? "Resume interrupted session" : "New session"}</h1>
-          <p>{resumeId ? "Choose which audio sources to record from now on. Nothing restarts without your say-so." : "Everything here is optional except the project."}</p>
+          <p>{resumeId ? "Choose which audio sources to record from now on. Nothing restarts without your say-so." : "Starts from how your last session was set up. Everything here is optional except the project."}</p>
         </div>
       </div>
       <div className="stack-lg">
@@ -249,9 +249,6 @@ export default function NewSession() {
             {devices.data?.error && <Banner kind="warn">{devices.data.error}</Banner>}
             <SourcePanel kind="mic" enabled={mic} setEnabled={setMic} device={micDev} setDevice={setMicDev} label={micLabel} setLabel={setMicLabel} devices={devices.data} />
             <SourcePanel kind="loopback" enabled={loop} setEnabled={setLoop} device={loopDev} setDevice={setLoopDev} label={loopLabel} setLabel={setLoopLabel} devices={devices.data} />
-            <div className="row">
-              <button className="btn ghost sm" onClick={() => rememberAudio.mutate()} disabled={rememberAudio.isPending}><Save size={14} /> Remember these audio choices</button>
-            </div>
           </div>
         </div>
 

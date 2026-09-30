@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mic, MonitorSpeaker, Pause, Play, Square, RotateCw, Radio, Camera } from "lucide-react";
+import { Mic, MonitorSpeaker, Pause, Play, Square, RotateCw, Camera, Sparkles } from "lucide-react";
 import { api } from "../api";
 import type { SessionDetail, SourceStatus, TimelineItem } from "../types";
-import { Banner, Empty, Meter, Modal, Toggle, fmtOffset, useToast, Lightbox } from "../components/ui";
+import { Banner, Meter, Modal, Toggle, fmtOffset, useToast, Lightbox } from "../components/ui";
 import Checklist from "../components/Checklist";
-import { useAppState } from "../state";
+import RecordingChips, { type ChipState } from "../components/RecordingChips";
+import { useAppState, useSettings } from "../state";
 
 const CONTEXT_LABEL: Record<string, string> = {
   typed: "Note added",
@@ -92,23 +93,18 @@ export default function ActiveSession() {
     onError: (e: Error) => toast("error", e.message),
   });
   const retry = useMutation({ mutationFn: (kind: string) => api.post(`/api/sessions/active/sources/${kind}/retry`) });
+  const { data: settings } = useSettings();
+  const live = useMutation({
+    mutationFn: (patch: Record<string, unknown>) => api.patch("/api/sessions/active", patch),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["state"] }); qc.invalidateQueries({ queryKey: ["settings"] }); qc.invalidateQueries({ queryKey: ["session", sid] }); },
+    onError: (e: Error) => toast("error", e.message),
+  });
   const pauseTranscription = useMutation({
     mutationFn: (paused: boolean) => api.patch("/api/settings", { transcription: { paused } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["state"] }),
   });
 
-  if (!s?.active) {
-    return (
-      <div className="page" style={{ maxWidth: 820 }}>
-        <div className="card">
-          <Empty icon={<Radio size={34} />} title="No session running" action={<Link to="/new" className="btn primary"><Play size={16} /> Start a session</Link>}>
-            You can still press <kbd>F8</kbd> or <kbd>F9</kbd> any time — captures go to your most recent project.
-          </Empty>
-        </div>
-        <div className="card" style={{ marginTop: 20 }}><QuickNote /></div>
-      </div>
-    );
-  }
+  if (!s?.active) return null;
 
   const items = timeline.data?.items ?? [];
   const captures = items.filter((i) => i.kind === "capture").slice(-8).reverse();
@@ -117,6 +113,25 @@ export default function ActiveSession() {
   const tw = state!.workers.transcription;
   const sources = s.sources ?? [];
   const backlog = (t?.queued ?? 0) + (t?.running ?? 0);
+  const mic = sources.find((x) => x.kind === "mic");
+  const loop = sources.find((x) => x.kind === "loopback");
+  const chips: ChipState = {
+    mic: !!mic, micLabel: mic?.label ?? "", loop: !!loop, loopLabel: loop?.label ?? "", live: s.transcription_mode === "live",
+    auto: !!settings?.auto_capture.enabled, ai: !!s.ai_enabled, ask: !!s.always_ask_context,
+  };
+  const changeLive = (p: Partial<ChipState>) => {
+    const body: Record<string, unknown> = {};
+    if (p.mic !== undefined) body.mic = { enabled: p.mic };
+    if (p.loop !== undefined) body.loopback = { enabled: p.loop };
+    if (p.live !== undefined) body.transcription_mode = p.live ? "live" : "after";
+    if (p.auto !== undefined) {
+      body.auto_capture = p.auto;
+      if (p.auto && s.transcription_mode !== "live" && sources.length) body.transcription_mode = "live";
+    }
+    if (p.ask !== undefined) body.always_ask_context = p.ask;
+    live.mutate(body);
+  };
+  const aw = state!.workers.auto_capture;
 
   return (
     <div className="page wide">
@@ -134,6 +149,13 @@ export default function ActiveSession() {
           <button className="btn" onClick={() => action.mutate("pause")}><Pause size={16} /> Pause</button>
         )}
         <button className="btn danger" onClick={() => setConfirmEnd(true)}><Square size={15} /> End session</button>
+      </div>
+
+      <div className="card stack" style={{ marginBottom: 20 }}>
+        <div className="row"><h3 className="grow">Recording</h3><span className="muted small">Changes apply immediately (also from the tray menu)</span></div>
+        <RecordingChips v={chips} onChange={changeLive} aiAvailable={!!state?.ai_enabled} disabled={live.isPending} live />
+        {chips.auto && aw.state === "needs_live" && <span className="small" style={{ color: "var(--warn)" }}>Auto screenshots are waiting for a live transcript{sources.length ? "" : " — turn on an audio source"}.</span>}
+        {chips.auto && aw.state === "watching" && <span className="small text-2"><Sparkles size={13} style={{ verticalAlign: -2 }} /> Watching the transcript · {aw.count} auto screenshot{aw.count === 1 ? "" : "s"} so far{aw.error ? ` · ${aw.error}` : ""}</span>}
       </div>
 
       <div className="split split-session">
@@ -161,9 +183,10 @@ export default function ActiveSession() {
                 {captures.map((c) => (
                   <figure key={c.id} style={{ margin: 0 }}>
                     <img src={c.thumb_url} className="thumb" style={{ width: 176, height: 99 }} alt={`Screenshot at ${fmtOffset(c.offset_ms)}`} onClick={() => setZoom(c.image_url!)} />
-                    <figcaption className="small muted row" style={{ gap: 6 }}>
-                      <Camera size={12} /> {fmtOffset(c.offset_ms)} · {CONTEXT_LABEL[c.context_state ?? ""] ?? c.context_state}
+                    <figcaption className="small muted row" style={{ gap: 6, maxWidth: 176 }}>
+                      {c.trigger === "auto" ? <Sparkles size={12} /> : <Camera size={12} />} {fmtOffset(c.offset_ms)} · {CONTEXT_LABEL[c.context_state ?? ""] ?? c.context_state}
                     </figcaption>
+                    {c.reason && <figcaption className="small text-2" style={{ maxWidth: 176 }} title={c.reason}>“{c.reason.length > 60 ? c.reason.slice(0, 60) + "…" : c.reason}”</figcaption>}
                   </figure>
                 ))}
               </div>
@@ -199,7 +222,7 @@ export default function ActiveSession() {
           <div className="card"><div className="card-head"><h3>Checklist</h3></div><Checklist sessionId={sid!} /></div>
           <div className="card"><QuickNote /></div>
           {!!state?.review.pending && (
-            <div className="card row"><span className="grow">{state.review.pending} card{state.review.pending === 1 ? "" : "s"} waiting for review</span><Link to="/review" className="btn sm">Review</Link></div>
+            <div className="card row"><span className="grow">{state.review.pending} card{state.review.pending === 1 ? "" : "s"} waiting for review</span><Link to="/items?tab=review" className="btn sm">Review</Link></div>
           )}
         </div>
       </div>

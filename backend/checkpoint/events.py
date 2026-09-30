@@ -55,6 +55,7 @@ class DesktopHooks:
         self.note_window_open: Callable[[], bool] = lambda: False
         self.hotkey_status: Callable[[], dict] = lambda: {"available": False, "reason": "Desktop host not running"}
         self.rebind_hotkeys: Optional[Callable[[], dict]] = None
+        self.offer_session: Optional[Callable[[dict], None]] = None  # a project's program started: offer a session
 
     @property
     def desktop_available(self) -> bool:
@@ -65,6 +66,13 @@ class DesktopHooks:
             try:
                 self.toast(level, message, work)
             except Exception:  # noqa: BLE001 - UI failure must never break capture
+                pass
+
+    def emit_offer(self, offer: dict) -> None:
+        if self.offer_session:
+            try:
+                self.offer_session(offer)
+            except Exception:  # noqa: BLE001
                 pass
 
     def emit_state(self) -> None:

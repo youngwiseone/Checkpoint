@@ -38,6 +38,8 @@ export interface ActiveSessionStatus {
   transcription_mode?: string;
   ai_enabled?: boolean;
   audio_functioning?: boolean;
+  always_ask_context?: boolean;
+  capture_target?: string;
   sources?: SourceStatus[];
 }
 
@@ -46,6 +48,29 @@ export interface HotkeyBinding {
   keys: string;
   registered: boolean;
   error: string | null;
+}
+
+export interface SessionOffer {
+  project_id: string;
+  project_name: string;
+  program: string;
+  at: number;
+}
+
+export interface WatchRule {
+  project_id: string;
+  kind: "exe" | "title";
+  match: string;
+}
+
+export interface SessionSetup {
+  project_id: string;
+  mic: { enabled: boolean; device: string | null; label: string };
+  loopback: { enabled: boolean; device: string | null; label: string };
+  capture_target: string;
+  transcription_mode: "live" | "after" | "off";
+  ai_enabled: boolean;
+  always_ask_context: boolean;
 }
 
 export interface AppState {
@@ -57,6 +82,7 @@ export interface AppState {
     transcription: { alive: boolean; busy: boolean; paused: boolean; model: string; model_installed: boolean; error: string | null; gpu_fallback: string | null; stalled?: boolean; device?: string };
     organiser: { alive: boolean; busy: boolean; current_run: string | null; enabled: boolean; error: string | null };
     auto_capture: { alive: boolean; enabled: boolean; state: "off" | "needs_live" | "watching"; count: number; error: string | null };
+    app_watch: { alive: boolean; offer: SessionOffer | null; running: string[]; error: string | null };
     sync: { alive: boolean; busy: boolean; offline_reason: string | null; last_ok: string | null; configured: boolean };
   };
   desktop: { available: boolean; hotkeys: { ok?: boolean; bindings?: HotkeyBinding[]; reason?: string | null } };
@@ -136,6 +162,7 @@ export interface Evidence {
   thumb_url?: string;
   image_url?: string;
   window_title?: string;
+  reason?: string | null;
   // segment
   segment_id?: string;
   end_ms?: number;
@@ -240,7 +267,8 @@ export interface TimelineItem {
   thumb_url?: string;
   image_url?: string;
   context_state?: string;
-  reason?: string;
+  trigger?: string;
+  reason?: string | null;
   event?: string;
   message?: string;
 }
@@ -278,7 +306,7 @@ export interface AudioDevices {
 
 export interface Settings {
   first_run_complete: boolean;
-  hotkeys: { capture: string; capture_context: string; quick_note: string };
+  hotkeys: { capture: string; capture_context: string; quick_note: string; start_session: string };
   capture: { always_ask_context: boolean; region: "foreground_monitor" | "foreground_window"; debounce_ms: number };
   audio: {
     mic_enabled: boolean;
@@ -291,7 +319,8 @@ export interface Settings {
   };
   transcription: { model: string; device: "cpu" | "cuda"; compute_type: string; default_mode: "after" | "live" | "off"; paused: boolean; cpu_threads: number; overlap_seconds: number };
   ai: { enabled: boolean; base_url: string; model: string; timeout_seconds: number; max_retries: number; chunk_chars: number; chunk_overlap_items: number; window_before_s: number; window_after_s: number };
-  auto_capture: { enabled: boolean; model: string; threshold: number; frame_interval_s: number; buffer_seconds: number; cooldown_s: number; max_per_session: number };
+  auto_capture: { enabled: boolean; model: string; threshold: number; frame_interval_s: number; buffer_seconds: number; cooldown_s: number; max_per_session: number; lead_s: number };
+  app_watch: { enabled: boolean; rules: WatchRule[] };
   sharing: { server_url: string; display_name: string; allow_insecure_private_network: boolean };
   last_project_id: string | null;
   data_dir: string;

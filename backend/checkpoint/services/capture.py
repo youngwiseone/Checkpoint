@@ -145,7 +145,7 @@ class CaptureService:
         hooks.emit_state()
         return payload
 
-    def auto_capture(self, frame) -> Optional[dict]:  # noqa: ANN001
+    def auto_capture(self, frame, reason: str = "") -> Optional[dict]:  # noqa: ANN001
         """Saves a buffered frame the auto-capture model picked, as an audio marker (like F8 with audio on)."""
         from ..capture import screen
 
@@ -153,12 +153,14 @@ class CaptureService:
         if active is None:
             return None
         g = screen.frame_to_grab(frame)
-        cap = self._persist(g, active.clock.utc_at(frame.mono), frame.mono, "auto", "marker")
-        hooks.emit_toast("success", f"Auto screenshot · marker at {fmt_offset(cap['offset_ms'])}", g.work_rect)
+        cap = self._persist(g, active.clock.utc_at(frame.mono), frame.mono, "auto", "marker", reason=reason or None)
+        short = reason if len(reason) <= 70 else reason[:70].rstrip() + "\u2026"
+        quote = f" \u00b7 \u201c{short}\u201d" if reason else ""
+        hooks.emit_toast("success", f"Auto screenshot at {fmt_offset(cap['offset_ms'])}{quote}", g.work_rect)
         hooks.emit_state()
         return cap
 
-    def _persist(self, g, taken_at: datetime, mono: float, trigger: str, status: str) -> dict:  # noqa: ANN001
+    def _persist(self, g, taken_at: datetime, mono: float, trigger: str, status: str, reason: Optional[str] = None) -> dict:  # noqa: ANN001
         active = self.sessions.active
         project_id = active.project_id if active else default_project_id()
         session_id = active.id if active else None
@@ -175,7 +177,7 @@ class CaptureService:
                 s.add(Capture(
                     id=cid, session_id=session_id, project_id=project_id, taken_at=taken_at, offset_ms=offset,
                     image_rel_path=img_rel, thumb_rel_path=thumb_rel, sha256=sha256_bytes(g.png), width=g.width,
-                    height=g.height, monitor=g.monitor, window_title=g.window_title, trigger=trigger, status=status,
+                    height=g.height, monitor=g.monitor, window_title=g.window_title, trigger=trigger, status=status, reason=reason,
                 ))
         except Exception:
             for p in (img_p, thumb_p):

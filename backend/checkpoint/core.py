@@ -51,6 +51,7 @@ class AppCore:
     def __init__(self) -> None:
         from .capture.auto import AutoCaptureWorker
         from .extraction.worker import ExtractionWorker
+        from .services.appwatch import AppWatcher
         from .services.capture import CaptureService
         from .services.sessions import SessionManager
         from .sharing.client import SyncWorker
@@ -64,6 +65,7 @@ class AppCore:
         self.organiser = ExtractionWorker()
         self.sync = SyncWorker()
         self.autocapture = AutoCaptureWorker(self.sessions, self.capture)
+        self.appwatch = AppWatcher(self.sessions)
         self.sessions.set_chunk_callback(lambda _cid: self.transcriber.wake())
         self.supervisor = None
         self.started = False
@@ -80,9 +82,9 @@ class AppCore:
             notices.push("info", f"Requeued {n} transcription job(s) that were interrupted.", "recovery")
         recover_runs()
         if workers:
-            for w in (self.transcriber, self.organiser, self.sync, self.autocapture):
+            for w in (self.transcriber, self.organiser, self.sync, self.autocapture, self.appwatch):
                 w.start()
-            self.supervisor = Supervisor([self.transcriber, self.organiser, self.sync, self.autocapture], [lambda: stale_recorder_check(self.sessions)])
+            self.supervisor = Supervisor([self.transcriber, self.organiser, self.sync, self.autocapture, self.appwatch], [lambda: stale_recorder_check(self.sessions)])
             self.supervisor.start()
         self.started = True
         log.info("Checkpoint core started; data in %s", paths().root)
@@ -95,9 +97,25 @@ class AppCore:
             log.exception("Error ending session on shutdown")
         if self.supervisor:
             self.supervisor.stop()
-        for w in (self.transcriber, self.organiser, self.sync, self.autocapture):
+        for w in (self.transcriber, self.organiser, self.sync, self.autocapture, self.appwatch):
             w.stop(timeout=3)
         self.autocapture.frames.stop()
+
+    def quick_start(self, project_id: Optional[str] = None) -> str:
+        """Start a session with the project's remembered setup: the given project, else the one whose
+        program was just detected, else the last project used."""
+        from .db import read_session
+        from .models import Project
+        from .services.sessions import remembered_setup
+        from .settings_store import get_settings
+
+        offer = self.appwatch.take_offer()
+        pid = project_id or (offer or {}).get("project_id") or get_settings().last_project_id
+        with read_session() as s:
+            p = s.get(Project, pid) if pid else None
+            if p is None or p.archived or p.is_demo:
+                raise ValueError("Pick a project first — open Checkpoint and create or select one.")
+        return self.sessions.start(remembered_setup(pid))
 
     def worker_status(self) -> dict:
         from .settings_store import get_settings
@@ -117,6 +135,7 @@ class AppCore:
             "organiser": {"alive": self.organiser.alive, "busy": self.organiser.busy, "current_run": self.organiser.current_run,
                           "enabled": st.ai.enabled, "error": self.organiser.last_error},
             "auto_capture": self.autocapture.status(),
+            "app_watch": self.appwatch.status(),
             "sync": {"alive": self.sync.alive, "busy": self.sync.busy, "offline_reason": self.sync.offline_reason,
                      "last_ok": self.sync.last_ok, "configured": bool(st.sharing.server_url)},
         }

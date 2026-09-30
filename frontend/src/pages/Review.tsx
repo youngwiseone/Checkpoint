@@ -276,7 +276,7 @@ function CardDrawer({ id, onClose, onApprove, onDismiss, onRestore }: { id: stri
             )}
             {d.uncertainty && <Banner kind="warn"><p><b>Uncertain:</b> {d.uncertainty}</p></Banner>}
             {d.conflict_note && d.origin === "ai" && <Banner kind="error"><p><b>Conflicting accounts:</b> {d.conflict_note}</p></Banner>}
-            {d.possibly_completed && <Banner kind="success"><p><b>Possibly completed.</b> The source explicitly says this was done. Approving keeps it Open — mark it Done in Project items once you've confirmed.</p></Banner>}
+            {d.possibly_completed && <Banner kind="success"><p><b>Possibly completed.</b> The source explicitly says this was done. Approving keeps it Open — mark it Done in Items once you've confirmed.</p></Banner>}
             <div className="row">
               <select className="select" style={{ width: 170 }} value={form.type} onChange={(e) => change({ type: e.target.value as ItemType })} aria-label="Type">
                 {TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
@@ -298,7 +298,7 @@ function CardDrawer({ id, onClose, onApprove, onDismiss, onRestore }: { id: stri
                 <button className="btn" onClick={() => setSplit(true)}><Scissors size={14} /> Split…</button>
               </>}
               {d.review_state === "dismissed" && !d.withdrawn && <button className="btn" onClick={() => onRestore(d.id)}><Undo2 size={14} /> Restore</button>}
-              {d.review_state === "approved" && <Link to="/items" className="btn"><ExternalLink size={14} /> View in Project items</Link>}
+              {d.review_state === "approved" && <Link to="/items" className="btn"><ExternalLink size={14} /> View in Items</Link>}
             </div>
             <hr className="divider" />
             <EvidenceView d={d} onChange={() => { q.refetch(); qc.invalidateQueries({ queryKey: ["drafts"] }); }} />
@@ -338,7 +338,8 @@ function NewCardModal({ onClose, defaultProject }: { onClose: () => void; defaul
   );
 }
 
-export default function Review() {
+/** The review inbox. Embedded in Items as its "To review" tab, scoped to the current project. */
+export default function Review({ projectId, embedded }: { projectId?: string; embedded?: boolean }) {
   const [params, setParams] = useSearchParams();
   const sessionFilter = params.get("session") ?? undefined;
   const [tab, setTab] = useState<Tab>("pending");
@@ -351,14 +352,14 @@ export default function Review() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({
-    queryKey: ["drafts", tab, sessionFilter],
-    queryFn: () => api.get<Draft[]>(`/api/drafts${qs({ state: tab, session_id: sessionFilter })}`),
+    queryKey: ["drafts", tab, sessionFilter, projectId],
+    queryFn: () => api.get<Draft[]>(`/api/drafts${qs({ state: tab, session_id: sessionFilter, project_id: projectId })}`),
     refetchInterval: 8000,
   });
-  const counts = useQuery({ queryKey: ["counts"], queryFn: () => api.get<{ pending: number; approved: number; dismissed: number; unfinished_captures: number }>("/api/review/counts"), refetchInterval: 5000 });
+  const counts = useQuery({ queryKey: ["counts", projectId], queryFn: () => api.get<{ pending: number; approved: number; dismissed: number; unfinished_captures: number }>(`/api/review/counts${qs({ project_id: projectId })}`), refetchInterval: 5000 });
   const drafts = useMemo(() => q.data ?? [], [q.data]);
   useEffect(() => { setFocus((f) => Math.min(f, Math.max(0, drafts.length - 1))); }, [drafts.length]);
-  useEffect(() => { setSelected(new Set()); setFocus(0); }, [tab, sessionFilter]);
+  useEffect(() => { setSelected(new Set()); setFocus(0); }, [tab, sessionFilter, projectId]);
 
   const refresh = useCallback(() => {
     qc.invalidateQueries({ queryKey: ["drafts"] });
@@ -368,7 +369,7 @@ export default function Review() {
   }, [qc]);
   const approve = useMutation({
     mutationFn: (ids: string[]) => api.post<{ approved: unknown[] }>("/api/drafts/approve", { ids }),
-    onSuccess: (r, ids) => { refresh(); setSelected(new Set()); toast("success", ids.length === 1 ? "Approved — added to Project items (status Open)" : `Approved ${r.approved.length} cards`); },
+    onSuccess: (r, ids) => { refresh(); setSelected(new Set()); toast("success", ids.length === 1 ? "Approved — added to Items (status Open)" : `Approved ${r.approved.length} cards`); },
     onError: (e: Error) => toast("error", e.message),
   });
   const dismiss = useMutation({
@@ -415,30 +416,32 @@ export default function Review() {
   const selPending = sel.filter((d) => d.review_state === "pending");
   const lastUndo = undoStack[undoStack.length - 1];
 
+  const clearSession = () => { const n = new URLSearchParams(params); n.delete("session"); setParams(n); };
   return (
-    <div className="page wide">
-      <div className="page-head">
-        <div className="grow">
-          <h1>Review inbox</h1>
-          <p>{counts.data ? (counts.data.pending ? `${counts.data.pending} card${counts.data.pending === 1 ? "" : "s"} left to review` : "All caught up") : " "}
-            {sessionFilter && <> · filtered to one session <button className="btn ghost sm" onClick={() => setParams({})}>Show all</button></>}</p>
+    <div className={embedded ? "" : "page wide"}>
+      {!embedded && (
+        <div className="page-head">
+          <div className="grow"><h1>Review inbox</h1></div>
         </div>
-        <button className="btn" onClick={() => setNewCard(true)}><Plus size={15} /> New card</button>
-      </div>
+      )}
       {!!counts.data?.unfinished_captures && (
         <div style={{ marginBottom: 16 }}>
-          <Banner kind="info" action={<Link to="/" className="btn sm">Open inbox</Link>}>
-            {counts.data.unfinished_captures} unfinished capture{counts.data.unfinished_captures === 1 ? "" : "s"} kept for later — add context or discard them from Projects & sessions.
+          <Banner kind="info" action={<Link to="/" className="btn sm">Open</Link>}>
+            {counts.data.unfinished_captures} unfinished capture{counts.data.unfinished_captures === 1 ? "" : "s"} kept for later — add context or discard them on the Session page.
           </Banner>
         </div>
       )}
-      <div className="tabs" role="tablist">
-        {(["pending", "approved", "dismissed"] as Tab[]).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-            {t === "pending" ? "To review" : t === "approved" ? "Approved" : "Dismissed & withdrawn"}
-            {counts.data && <span className="muted"> {counts.data[t]}</span>}
-          </button>
-        ))}
+      <div className="row wrap" style={{ marginBottom: 10 }}>
+        <div className="seg" role="radiogroup" aria-label="Show">
+          {(embedded ? (["pending", "dismissed"] as Tab[]) : (["pending", "approved", "dismissed"] as Tab[])).map((t) => (
+            <button key={t} role="radio" aria-checked={tab === t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
+              {t === "pending" ? "To review" : t === "approved" ? "Approved" : "Dismissed"}{counts.data ? ` ${counts.data[t]}` : ""}
+            </button>
+          ))}
+        </div>
+        {sessionFilter && <span className="small text-2">One session only <button className="btn ghost sm" onClick={clearSession}>Show all</button></span>}
+        <span className="spacer" />
+        <button className="btn sm" onClick={() => setNewCard(true)}><Plus size={14} /> New card</button>
       </div>
       <div className="row wrap" style={{ marginBottom: 12, minHeight: 36 }}>
         {selected.size > 0 ? (
@@ -478,12 +481,12 @@ export default function Review() {
         <Modal title={`Approve ${selPending.length} card${selPending.length === 1 ? "" : "s"}?`} onClose={() => setConfirmBulk(false)} footer={
           <><button className="btn" onClick={() => setConfirmBulk(false)}>Cancel</button>
             <button className="btn primary" onClick={() => { setConfirmBulk(false); approve.mutate(selPending.map((d) => d.id)); }}>Approve {selPending.length}</button></>}>
-          <p>Only these selected cards will be approved and added to Project items with status Open:</p>
+          <p>Only these selected cards will be approved and added to Items with status Open:</p>
           <ul>{selPending.map((d) => <li key={d.id}>{d.title}</li>)}</ul>
           <p className="muted small">Approving doesn't mark work as done and doesn't share anything.</p>
         </Modal>
       )}
-      {newCard && <NewCardModal onClose={() => setNewCard(false)} />}
+      {newCard && <NewCardModal onClose={() => setNewCard(false)} defaultProject={projectId} />}
     </div>
   );
 }

@@ -36,28 +36,38 @@ for troubleshooting.
 | **F8** | Screenshot of the display with the active app. If audio is recording: saved + timeline marker + a small toast that doesn't steal focus. If no audio is recording: a note window opens next to your work. |
 | **Shift+F8** | Screenshot and always ask for a note. |
 | **F9** | Text-only quick note. |
+| **Ctrl+F8** | Start a session for the current project with the same setup as its last session. Press twice within 3 s to end it. |
+
+**Set and forget:** pick the project in the sidebar and press **Start session** (or **Ctrl+F8** anywhere). Each
+session starts like the project's previous one (audio sources, devices, labels, transcription, auto screenshots).
+Under **Offer a session when a program starts…**, pick the program you test (by exe, or by window title for
+editors). When it opens, Checkpoint shows a toast and a tray message; press **Ctrl+F8** or click the message to
+start. While a session runs, the chips on the Session page and the tray menu turn the microphone, computer audio,
+live transcript and auto screenshots on or off immediately.
 
 In the note window, **Ctrl+Enter** saves, **Enter** adds a new line, **Esc** keeps the screenshot in
 *Unfinished captures* without creating a card, **Discard** removes it. Focus returns to your app.
 Shortcuts can be remapped in Settings → Shortcuts; conflicts with other apps are reported.
 
-Review inbox keys: **J/K** move, **A** keep (approve), **E** edit, **D** dismiss, **U** undo, **X** select.
+**Items** has tabs for *To review* (cards), *Open*, *Done* and *All*. Review keys: **J/K** move, **A** keep (approve), **E** edit, **D** dismiss, **U** undo, **X** select.
 Review state (Pending/Approved/Dismissed), work status (Open/In progress/Done/Won't do) and sharing
 state (Local only/Pending/Synced/Failed/Conflict) are independent — approving never marks work done
 and never uploads anything.
 
-Try it with **Projects & sessions → Load demo project** (clearly labelled synthetic data).
+Try it with **Load demo project** on the Session page of a new install (clearly labelled synthetic data).
 
 ## Sending items to an AI assistant
 
-Select items in **Project items** (or open one) and press **Send to AI**:
+In **Items**, tick items (Shift+click selects a range) and press **Send to Claude / Codex**, or press
+**Send all N** to send the whole filtered list. With several items the prompt asks the assistant to work
+through them in order and report back at the end:
 
 - **Claude Desktop / Codex** — connect them once in **Settings → AI assistants** (then restart that app).
   *Send to AI* copies a short prompt such as “use get_handoff with H-3”; paste it into the chat and the
   assistant fetches the items, verbatim notes and screenshots itself through the read-only Checkpoint
   connector (MCP). You can also just ask it to “list my open Checkpoint bugs”.
 - **Any other AI** — *Copy as text* puts the items on the clipboard; *Open screenshots folder* gives you the
-  images to drag in. Project items → Export also produces a Markdown/JSON/ZIP bundle.
+  images to drag in. Items → Export also produces a Markdown/JSON/ZIP bundle.
 
 Checkpoint never uploads anything itself, and audio or full transcripts are never included.
 
@@ -70,7 +80,10 @@ Checkpoint never uploads anything itself, and audio or full transcripts are neve
 - **Auto screenshots** — Settings → Local AI → Auto screenshots. During a session with **live** transcription,
   a Jev-style decision model through Ollama 0.35+ (default `tev1:0.8b`, via `/v1/systemone`) reads each
   transcript line and only returns the chance it points out a problem on screen; it never writes text.
-  The last ~90 s of screen is kept in memory, so a picked line saves the frame from when it was said, as a marker.
+  The last ~90 s of screen is kept in memory. A picked line is narrowed to the sentence that mentions the problem,
+  and the frame from ~1.5 s before it was said is saved as a marker, with the sentence as its reason. Filler lines,
+  Whisper hallucinations and moments you already captured with F8 are skipped. Shots are at least 45 s apart, and
+  the default sensitivity is 0.7 (chatter scores about 0.5).
 - **Shared workspace** — run the small server in [`backend/server`](backend/server) with PostgreSQL; see
   [docs/shared-server.md](docs/shared-server.md).
 

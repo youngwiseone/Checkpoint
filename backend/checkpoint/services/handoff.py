@@ -58,7 +58,13 @@ def _kind(types: set[str]) -> str:
     return "features" if "bug" not in types else "mixed"
 
 
-def task_text(mode: str, extra: str = "", types: set[str] | None = None) -> str:
+BATCH = ("Work through the items one at a time, in the order listed, without waiting for me between them. "
+         "Only stop to ask if one is blocked on a decision; otherwise note it and move on. "
+         "When you've finished, give me a short list: each item's title and what happened (done, needs a decision, "
+         "couldn't reproduce).")
+
+
+def task_text(mode: str, extra: str = "", types: set[str] | None = None, count: int = 1) -> str:
     mode = _MODE_ALIASES.get(mode, mode)
     if mode not in MODES:
         raise ValueError("Unknown mode")
@@ -100,6 +106,8 @@ def task_text(mode: str, extra: str = "", types: set[str] | None = None) -> str:
             "mixed": "for bugs, find the likely cause and propose a fix; for features and improvements, propose how you would implement them",
         }[kind]
         text = f"Please investigate each item: {what}. {_EVIDENCE} Don't change any files yet."
+    if count > 1 and mode != "read":
+        text += "\n\n" + BATCH
     parts = [text]
     extra = (extra or "").strip()
     if extra:
@@ -115,7 +123,7 @@ def item_types(item_ids: list[str]) -> set[str]:
 def create(item_ids: list[str], include_screenshots: bool, include_excerpts: bool, instruction: str = "",
            mode: str = "implement_commit") -> dict:
     ids = list(dict.fromkeys(item_ids))
-    instruction = task_text(mode, instruction, item_types(ids))
+    instruction = task_text(mode, instruction, item_types(ids), len(ids))
     if not ids:
         raise ValueError("Select at least one item to send")
     with write_session() as s:

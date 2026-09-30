@@ -59,6 +59,7 @@ class Bridge(QObject):
     note_requested = Signal(dict)
     toast_requested = Signal(str, str, object)
     state_changed = Signal()
+    offer_requested = Signal(dict)
 
 
 class DesktopHost:
@@ -74,6 +75,8 @@ class DesktopHost:
         self.bridge.note_requested.connect(self.note_window.open_for)
         self.bridge.toast_requested.connect(lambda lvl, msg, work: self.toast.show_message(lvl, msg, work))
         self.bridge.state_changed.connect(self._refresh_tray)
+        self.bridge.offer_requested.connect(self._show_offer)
+        self._end_armed_at = 0.0
         self.hotkeys = None
         self.server: Optional[ServerThread] = None
         self.auth: Optional[AuthState] = None
@@ -115,6 +118,7 @@ class DesktopHost:
         hooks.note_window_open = lambda: self.note_window.isVisible()
         hooks.hotkey_status = lambda: self.hotkeys.summary() if self.hotkeys else {"ok": False, "reason": "Hotkeys unavailable"}
         hooks.rebind_hotkeys = self._rebind
+        hooks.offer_session = lambda offer: self.bridge.offer_requested.emit(offer)
 
     def _rebind(self) -> dict:
         if not self.hotkeys:
@@ -136,6 +140,8 @@ class DesktopHost:
             cap.hotkey_capture(ask_context=False)
         elif action == "capture_context":
             cap.hotkey_capture(ask_context=True)
+        elif action == "start_session":
+            self._start_or_end_hotkey()
         elif action == "quick_note":
             from ..capture import win32
 
@@ -144,6 +150,47 @@ class DesktopHost:
                 "id": None, "mono": mono, "fg_hwnd": fg.hwnd if fg else 0,
                 "work_rect": fg.work_rect.as_mss() if fg and fg.work_rect else None,
             })
+
+    # ------------------------------------------------------------ one-key sessions
+    def _hotkey_label(self) -> str:
+        return get_settings().hotkeys.start_session
+
+    def _start_or_end_hotkey(self) -> None:
+        """Start a session with the remembered setup; pressed twice within 3 s while one runs, end it."""
+        if self.core.sessions.active is None:
+            self._quick_start()
+            return
+        now = time.monotonic()
+        if now - self._end_armed_at < 3:
+            self._end_armed_at = 0.0
+            self.core.sessions.end()
+            self.core.transcriber.wake()
+            self.core.organiser.wake()
+            hooks.emit_toast("info", "Session ended. Saved content will be processed in the background.")
+            self.bridge.state_changed.emit()
+        else:
+            self._end_armed_at = now
+            hooks.emit_toast("info", f"Session running. Press {self._hotkey_label()} again to end it.")
+
+    def _quick_start(self, project_id: Optional[str] = None) -> None:
+        try:
+            self.core.quick_start(project_id)
+        except ValueError as e:
+            hooks.emit_toast("warning", str(e))
+            return
+        st = self.core.sessions.status()
+        srcs = ", ".join(s["label"] for s in st.get("sources", [])) or "no audio (F8 asks for a note)"
+        hooks.emit_toast("success", f"Session started · recording {srcs}. Change it any time from the tray.")
+        self.bridge.state_changed.emit()
+
+    def _show_offer(self, offer: dict) -> None:
+        msg = f"{offer['program']} is running. Press {self._hotkey_label()} to start a \u201c{offer['project_name']}\u201d session."
+        self.toast.show_message("info", msg, None, duration_ms=12000)
+        self.tray.showMessage("Start a session?", msg + " Or click here.", self.icons["session"], 12000)
+
+    def _on_message_clicked(self) -> None:
+        if self.core.appwatch.offer and self.core.sessions.active is None:
+            self._quick_start()
 
     def _save_note(self, payload: dict, text: str, category: Optional[str]) -> Optional[str]:
         try:
@@ -186,15 +233,21 @@ class DesktopHost:
         self.act_open = QAction("Open Checkpoint", triggered=self.open_ui)
         self.act_status = QAction("No session running")
         self.act_status.setEnabled(False)
+        self.act_start = QAction("Start session", triggered=lambda: self._quick_start())
         self.act_pause = QAction("Pause recording", triggered=self._toggle_pause)
+        self.act_mic = QAction("Record microphone", checkable=True, triggered=lambda on: self._toggle_source("mic", on))
+        self.act_loop = QAction("Record computer audio", checkable=True, triggered=lambda on: self._toggle_source("loopback", on))
+        self.act_auto = QAction("Auto screenshots", checkable=True, triggered=self._toggle_auto)
         self.act_end = QAction("End session", triggered=self._end_session)
         self.act_quit = QAction("Quit", triggered=self.quit)
-        for a in (self.act_open, None, self.act_status, self.act_pause, self.act_end, None, self.act_quit):
+        for a in (self.act_open, None, self.act_status, self.act_start, self.act_pause, self.act_mic, self.act_loop, self.act_auto,
+                  self.act_end, None, self.act_quit):
             if a is None:
                 menu.addSeparator()
             else:
                 menu.addAction(a)
         self.tray.setContextMenu(menu)
+        self.tray.messageClicked.connect(self._on_message_clicked)
         self.tray.activated.connect(lambda reason: self.open_ui() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
         self.tray.show()
         self._menu = menu
@@ -204,13 +257,23 @@ class DesktopHost:
 
     def _refresh_tray(self) -> None:
         st = self.core.sessions.status()
-        if not st.get("active"):
+        live = bool(st.get("active"))
+        for a in (self.act_pause, self.act_mic, self.act_loop, self.act_auto, self.act_end):
+            a.setVisible(live)
+        self.act_start.setVisible(not live)
+        if not live:
             self.tray.setIcon(self.icons["idle"])
             self.tray.setToolTip("Checkpoint — no session")
             self.act_status.setText("No session running")
-            self.act_pause.setVisible(False)
-            self.act_end.setVisible(False)
+            offer = self.core.appwatch.offer
+            name = offer["project_name"] if offer else self._last_project_name()
+            self.act_start.setText(f"Start session: {name}  ({self._hotkey_label()})" if name else "Start session")
+            self.act_start.setEnabled(bool(name))
             return
+        kinds = {x["kind"] for x in st["sources"]}
+        self.act_mic.setChecked("mic" in kinds)
+        self.act_loop.setChecked("loopback" in kinds)
+        self.act_auto.setChecked(get_settings().auto_capture.enabled)
         srcs = st["sources"]
         problems = [s for s in srcs if s["state"] in ("failed", "reconnecting") or s.get("error")]
         recording = [s for s in srcs if s["state"] in ("recording", "idle")]
@@ -228,6 +291,31 @@ class DesktopHost:
         self.act_pause.setVisible(True)
         self.act_end.setVisible(True)
         self.act_pause.setText("Resume recording" if st["paused"] else "Pause recording")
+
+    def _last_project_name(self) -> Optional[str]:
+        from ..db import read_session
+        from ..models import Project
+
+        pid = get_settings().last_project_id
+        if not pid:
+            return None
+        with read_session() as s:
+            p = s.get(Project, pid)
+            return p.name if p and not p.archived and not p.is_demo else None
+
+    def _toggle_source(self, kind: str, on: bool) -> None:
+        try:
+            self.core.sessions.set_source(kind, on)
+        except ValueError as e:
+            hooks.emit_toast("warning", str(e))
+        self._refresh_tray()
+
+    def _toggle_auto(self, on: bool) -> None:
+        from ..settings_store import update_settings
+
+        update_settings({"auto_capture": {"enabled": on}})
+        self.core.autocapture.wake()
+        self._refresh_tray()
 
     def _toggle_pause(self) -> None:
         st = self.core.sessions.status()
@@ -288,7 +376,8 @@ class DesktopHost:
 
         def bindings() -> dict[str, str]:
             hk = get_settings().hotkeys
-            return {"capture": hk.capture, "capture_context": hk.capture_context, "quick_note": hk.quick_note}
+            return {"capture": hk.capture, "capture_context": hk.capture_context, "quick_note": hk.quick_note,
+                    "start_session": hk.start_session}
 
         self.hotkeys = HotkeyThread(bindings, self._on_hotkey)
         self.hotkeys.start()

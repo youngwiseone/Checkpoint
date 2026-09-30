@@ -80,7 +80,8 @@ def test_picks_frame_from_when_words_were_said(app_env, monkeypatch):
     w.step()
     caps = _auto_caps(sid)
     assert [st for _, st in caps] == ["marker", "marker"]
-    assert abs(caps[0][0] - at(60)) <= 1100 and abs(caps[1][0] - at(10)) <= 1100
+    # The frame comes from just before the remark (lead_s = 1.5 s): people describe what they've just seen.
+    assert abs(caps[0][0] - at(61.5)) <= 1100 and abs(caps[1][0] - at(11.5)) <= 1100
     assert asked[0] == "warm up" and len(asked) == 5 and w.count == 2
     w.step()  # already-decided lines are never asked about or captured twice
     assert len(asked) == 5 and len(_auto_caps(sid)) == 2
@@ -141,3 +142,75 @@ def test_decision_uses_systemone_noul(app_env):
     update_settings({"auto_capture": {"model": "missing"}})
     with pytest.raises(ProviderError, match="ollama pull missing"):
         w.decide("that's a bug")
+
+
+def test_narrows_long_lines_and_skips_noise(app_env, monkeypatch):
+    from checkpoint.db import read_session
+    from checkpoint.models import Capture
+
+    sm, w, sid, src_id, now = _setup(monkeypatch)
+    at = lambda back: sm.active.clock.offset_ms(now - back)  # noqa: E731
+    import uuid
+
+    from checkpoint.db import write_session
+    from checkpoint.models import TranscriptSegment
+
+    with write_session() as s:  # a 20 s line where the problem is mentioned near the end
+        s.add(TranscriptSegment(id=str(uuid.uuid4()), session_id=sid, source_id=src_id, start_ms=at(70), end_ms=at(50),
+                                text="We went over to the big tower on the left. Then we climbed all the way up. The jump on the fire is broken."))
+    _segment(sid, src_id, at(40), "Okay.")  # filler: never asked
+    _segment(sid, src_id, at(30), "Please subscribe to the channel and see you next time")  # Whisper hallucination
+    asked = []
+    w.decide = lambda text: asked.append(text) or "broken" in text
+    w.score = lambda text: 0.9 if "broken" in text else 0.3
+    w.step()
+    assert asked[1:] == ["We went over to the big tower on the left. Then we climbed all the way up. The jump on the fire is broken."]
+    with read_session() as s:
+        cap = s.scalars(select_auto(sid)).one()
+        assert cap.reason == "The jump on the fire is broken."
+        # ~75% into the 20 s line, minus the lead: well after the line's start
+        assert abs(cap.offset_ms - (at(70) + 0.75 * 20000 - 1500)) <= 2100
+    sm.end()
+
+
+def test_skips_moments_already_captured_by_hand(app_env, monkeypatch):
+    from checkpoint.db import write_session
+    from checkpoint.models import Capture
+
+    sm, w, sid, src_id, now = _setup(monkeypatch)
+    at = lambda back: sm.active.clock.offset_ms(now - back)  # noqa: E731
+    from datetime import datetime, timezone
+
+    with write_session() as s:
+        s.add(Capture(session_id=sid, project_id=sm.active.project_id, taken_at=datetime.now(timezone.utc), offset_ms=at(25),
+                      image_rel_path="x.png", thumb_rel_path="x.jpg", sha256="0", width=1, height=1, trigger="hotkey", status="marker"))
+    _segment(sid, src_id, at(20), "that's a bug with the door")
+    w.decide = lambda text: True
+    w.step()
+    assert _auto_caps(sid) == []
+    sm.end()
+
+
+def select_auto(sid):
+    from sqlalchemy import select
+
+    from checkpoint.models import Capture
+
+    return select(Capture).where(Capture.session_id == sid, Capture.trigger == "auto")
+
+
+def test_old_default_settings_are_upgraded(app_env):
+    from checkpoint.db import write_session
+    from checkpoint.models import Setting
+    from checkpoint.settings_store import get_settings, invalidate_cache
+
+    with write_session() as s:
+        row = s.get(Setting, "app")
+        value = {"auto_capture": {"enabled": True, "threshold": 0.5, "cooldown_s": 15, "max_per_session": 40}}
+        if row:
+            row.value = value
+        else:
+            s.add(Setting(key="app", value=value))
+    invalidate_cache()
+    ac = get_settings().auto_capture
+    assert (ac.enabled, ac.threshold, ac.cooldown_s, ac.max_per_session) == (True, 0.7, 45, 25)

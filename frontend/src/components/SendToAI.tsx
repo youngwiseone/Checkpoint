@@ -41,21 +41,33 @@ function savedMode(): Mode {
   }
 }
 
-export default function SendToAIModal({ ids, onClose }: { ids: string[]; onClose: () => void }) {
+function savedFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function remember(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* per-viewer convenience only */ }
+}
+
+export default function SendToAIModal({ ids, onClose, onSent }: { ids: string[]; onClose: () => void; onSent?: () => void }) {
   const [mode, setModeState] = useState<Mode>(savedMode);
-  const setMode = (m: Mode) => {
-    setModeState(m);
-    setCopied(null);
-    try { localStorage.setItem("checkpoint.ai-mode", m); } catch { /* per-viewer convenience only */ }
-  };
-  const [shots, setShots] = useState(true);
-  const [excerpts, setExcerpts] = useState(true);
+  const [shots, setShotsState] = useState(() => savedFlag("checkpoint.ai-shots", true));
+  const [excerpts, setExcerptsState] = useState(() => savedFlag("checkpoint.ai-excerpts", true));
   const [instruction, setInstruction] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const setMode = (m: Mode) => { setModeState(m); setCopied(null); remember("checkpoint.ai-mode", m); };
+  const setShots = (v: boolean) => { setShotsState(v); setCopied(null); remember("checkpoint.ai-shots", v ? "1" : "0"); };
+  const setExcerpts = (v: boolean) => { setExcerptsState(v); setCopied(null); remember("checkpoint.ai-excerpts", v ? "1" : "0"); };
   const toast = useToast();
   const integrations = useQuery({ queryKey: ["integrations"], queryFn: () => api.get<Integration[]>("/api/integrations") });
   const connected = (integrations.data ?? []).filter((i) => i.connected);
   const body = { ids, include_screenshots: shots, include_excerpts: excerpts, instruction, mode };
+  const n = ids.length;
 
   const send = useMutation({
     mutationFn: () => api.post<{ code: string; prompt: string }>("/api/handoffs", body),
@@ -63,6 +75,7 @@ export default function SendToAIModal({ ids, onClose }: { ids: string[]; onClose
       try {
         await copyText(r.prompt);
         setCopied(r.code);
+        onSent?.();
       } catch (e) {
         toast("error", (e as Error).message);
       }
@@ -84,48 +97,46 @@ export default function SendToAIModal({ ids, onClose }: { ids: string[]; onClose
   });
 
   return (
-    <Modal title={`Send ${ids.length} item${ids.length === 1 ? "" : "s"} to an AI assistant`} onClose={onClose} footer={<button className="btn" onClick={onClose}>Close</button>}>
+    <Modal title={`Send ${n} item${n === 1 ? "" : "s"} to Claude / Codex`} onClose={onClose} footer={<button className="btn" onClick={onClose}>{copied ? "Done" : "Close"}</button>}>
       <div className="stack">
-        <div className="row wrap" style={{ gap: 20 }}>
-          <label className="check"><input type="checkbox" checked={shots} onChange={(e) => setShots(e.target.checked)} /> Include screenshots</label>
-          <label className="check"><input type="checkbox" checked={excerpts} onChange={(e) => setExcerpts(e.target.checked)} /> Include what was said/typed</label>
-        </div>
+        {integrations.data && connected.length === 0 && (
+          <Banner kind="info">Connect Claude Desktop or Codex once in <Link to="/settings?tab=assistants" onClick={onClose}>Settings → AI assistants</Link> so they can fetch the items and screenshots themselves.</Banner>
+        )}
         <div className="field">
-          <span className="label">What should the AI do?</span>
+          <span className="label">What should it do?</span>
           <div className="seg" role="radiogroup" aria-label="What should the AI do?">
             {MODES.map((m) => (
               <button key={m.v} role="radio" aria-checked={mode === m.v} className={mode === m.v ? "on" : ""} onClick={() => setMode(m.v)}>{m.label}</button>
             ))}
           </div>
-          <span className="hint">{MODES.find((m) => m.v === mode)?.hint}</span>
+          <span className="hint">{MODES.find((m) => m.v === mode)?.hint}{n > 1 && mode !== "read" ? ` It works through all ${n} in order and reports back at the end.` : ""}</span>
         </div>
-        <div className="field">
-          <label htmlFor="ai-instr">Anything else? <span className="muted">(optional)</span></label>
-          <textarea id="ai-instr" className="textarea" rows={2} value={instruction} onChange={(e) => { setInstruction(e.target.value); setCopied(null); }}
-            placeholder="e.g. The death replay code is in scripts/rpg/, or: keep the new menu consistent with the settings screen." />
+        <div className="row wrap">
+          <button className="btn primary lg" onClick={() => send.mutate()} disabled={send.isPending}><Send size={16} /> Copy prompt</button>
+          {copied ? <span className="row small" style={{ color: "var(--success)" }}><Check size={15} /> Copied {copied}. Paste it into {connected.map((c) => c.name).join(" or ") || "Claude Desktop or Codex"} (Ctrl+V).</span>
+            : connected.length > 0 && <span className="badge success"><Bot size={12} /> {connected.map((c) => c.name).join(", ")}</span>}
         </div>
-
-        <div className="card stack">
-          <div className="row"><Bot size={18} className="muted" /><b className="grow">Claude Desktop / Codex</b>
-            {connected.length > 0 && <span className="badge success">Connected: {connected.map((c) => c.name).join(", ")}</span>}</div>
-          {integrations.data && connected.length === 0 && (
-            <Banner kind="info">Connect Claude Desktop or Codex once in <Link to="/settings?tab=assistants" onClick={onClose}>Settings → AI assistants</Link>. They can then fetch these items and screenshots themselves.</Banner>
-          )}
-          <p className="small text-2">Copies a short prompt. Paste it into Claude Desktop or Codex (Ctrl+V); the assistant fetches the items and screenshots from Checkpoint on this PC.</p>
-          <div className="row">
-            <button className="btn primary" onClick={() => send.mutate()} disabled={send.isPending}><Send size={15} /> Copy prompt for Claude / Codex</button>
-            {copied && <span className="row small" style={{ color: "var(--success)" }}><Check size={15} /> Copied handoff {copied}. Paste it into the chat.</span>}
+        <details>
+          <summary className="label" style={{ cursor: "pointer" }}>Options</summary>
+          <div className="stack" style={{ marginTop: 10 }}>
+            <div className="row wrap" style={{ gap: 20 }}>
+              <label className="check"><input type="checkbox" checked={shots} onChange={(e) => setShots(e.target.checked)} /> Include screenshots</label>
+              <label className="check"><input type="checkbox" checked={excerpts} onChange={(e) => setExcerpts(e.target.checked)} /> Include what was said/typed</label>
+            </div>
+            <div className="field">
+              <label htmlFor="ai-instr">Anything else? <span className="muted">(optional)</span></label>
+              <textarea id="ai-instr" className="textarea" rows={2} value={instruction} onChange={(e) => { setInstruction(e.target.value); setCopied(null); }}
+                placeholder="e.g. The death replay code is in scripts/rpg/, or: keep the new menu consistent with the settings screen." />
+            </div>
           </div>
-        </div>
-
-        <div className="card stack">
-          <b>Any other AI</b>
-          <p className="small text-2">For chats without the Checkpoint connector: copy the text, then drag in the screenshots from the folder.</p>
-          <div className="row wrap">
+        </details>
+        <details>
+          <summary className="label" style={{ cursor: "pointer" }}>Another AI (no Checkpoint connector)</summary>
+          <div className="row wrap" style={{ marginTop: 10 }}>
             <button className="btn" onClick={() => copyPlain.mutate()} disabled={copyPlain.isPending}><ClipboardCopy size={15} /> Copy as text</button>
             {shots && <button className="btn" onClick={() => folder.mutate()} disabled={folder.isPending}><FolderOpen size={15} /> Open screenshots folder</button>}
           </div>
-        </div>
+        </details>
         <p className="hint">Nothing is uploaded by Checkpoint. Audio and full transcripts are never included.</p>
       </div>
     </Modal>

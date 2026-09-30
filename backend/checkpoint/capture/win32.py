@@ -136,6 +136,61 @@ def exclude_from_capture(hwnd: int) -> bool:
         return False
 
 
+def _exe_name(pid: int) -> str:
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not h:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        n = wintypes.DWORD(1024)
+        if not k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+            return ""
+        return buf.value.replace("/", "\\").rsplit("\\", 1)[-1]
+    finally:
+        k32.CloseHandle(h)
+
+
+def visible_windows() -> list[dict]:
+    """Visible, titled top-level windows of other programs: [{exe, title, pid}]. Titles and exe names only."""
+    if not IS_WIN:
+        return []
+    import os
+
+    own = os.getpid()
+    found: list[tuple[int, str]] = []
+    proto = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def cb(hwnd, _lp):  # noqa: ANN001, ANN202
+        if user32.IsWindowVisible(hwnd) and not user32.GetWindow(hwnd, 4):  # GW_OWNER: skip owned popups
+            n = user32.GetWindowTextLengthW(hwnd)
+            if n > 0:
+                buf = ctypes.create_unicode_buffer(n + 1)
+                user32.GetWindowTextW(hwnd, buf, n + 1)
+                pid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if pid.value != own:
+                    found.append((int(pid.value), buf.value))
+        return True
+
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetWindow.restype = wintypes.HWND
+    user32.EnumWindows(proto(cb), 0)
+    exes: dict[int, str] = {}
+    out = []
+    for pid, title in found:
+        if pid not in exes:
+            exes[pid] = _exe_name(pid)
+        out.append({"exe": exes[pid], "title": title, "pid": pid})
+    return out
+
+
 def current_pid() -> int:
     import os
 

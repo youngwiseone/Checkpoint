@@ -48,7 +48,7 @@ def evidence_payload(s, links: Iterable[EvidenceLink]) -> list[dict]:  # noqa: A
                 continue
             out.append({**base, "kind": "capture", "capture_id": c.id, "offset_ms": c.offset_ms, "taken_at": _iso(c.taken_at),
                         "thumb_url": f"/api/media/captures/{c.id}/thumb", "image_url": f"/api/media/captures/{c.id}/image",
-                        "window_title": c.window_title, "width": c.width, "height": c.height})
+                        "window_title": c.window_title, "width": c.width, "height": c.height, "reason": c.reason})
         elif link.segment_id:
             seg = s.get(TranscriptSegment, link.segment_id)
             if seg is None:
