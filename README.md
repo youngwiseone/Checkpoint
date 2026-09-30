@@ -122,3 +122,13 @@ frontend/                 React + TypeScript + Vite UI (served by the backend af
   boundary can occasionally be lost or clipped.
 - The local model can misread conversations; every suggestion is a draft linked to its exact source lines.
 - Windows only for the desktop app; no installer or `.exe` yet.
+
+## License
+
+Copyright (C) 2026 Bligh Hedges
+
+Checkpoint is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version. It is distributed WITHOUT ANY WARRANTY;
+see [LICENSE](LICENSE) for details. If you run a modified version as a network service (for
+example the shared server), you must offer its users the corresponding source code.
