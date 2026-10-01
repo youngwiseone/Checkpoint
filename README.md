@@ -63,8 +63,11 @@ The everyday loop runs from shortcuts, without opening the main window:
 
 1. **Capture.** F8 / Shift+F8 / F9 as above. With audio on, an F8 press (or an auto screenshot) becomes a
    *suggested* card as soon as the speech around it is transcribed, so you don't have to end the session.
-2. **Review with Ctrl+F9.** One card at a time with its screenshot: **A** approve, **D** dismiss, **U** undo,
-   **E** edit (the first line is the title; **Ctrl+Enter** saves), **N** rename the session, **R** restart the preview,
+2. **Review with Ctrl+F9.** A stack of cards floats at the side of the screen (the rest of the screen stays visible
+   and clickable), each with its screenshot, the next ones waiting behind. **Swipe up** (or **A** / **↑**) to approve:
+   the card flies into the *Send N approved* counter. **Swipe down** (or **D** / **↓**) to dismiss, **U** to undo,
+   **click** (or **E** / **Enter**) to edit in place (the first line is the title; **Ctrl+Enter** saves),
+   **N** rename the session, **R** restart the preview,
    **Tab** task status, **Esc** hides it from anywhere and keeps your place and any unsaved text. Letter keys never act
    while you type. Reviewing the last card goes straight to the send step.
    The overlay opens on the running session, else the project whose program is in the foreground, and only asks
