@@ -141,6 +141,58 @@ def draw_lines(p: QPainter, text: str, font: QFont, color: QColor, x: float, y: 
     return min(len(lines), max_lines) * lh
 
 
+def paint_shadow(p: QPainter, rect: QRectF, tint: QColor, strength: float) -> None:
+    """The soft, tinted glow under a card."""
+    p.setPen(Qt.PenStyle.NoPen)
+    for k in range(10, 0, -1):
+        c = QColor(tint)
+        c.setAlphaF(0.024 * strength)
+        p.setBrush(c)
+        p.drawRoundedRect(rect.adjusted(-k * 2.2, -k * 1.2 + 10, k * 2.2, k * 3 + 10), RADIUS + k * 2, RADIUS + k * 2)
+
+
+def paint_pill(p: QPainter, r: QRectF) -> None:
+    """A floating white pill (header, messages, key hints)."""
+    p.setPen(Qt.PenStyle.NoPen)
+    for k in range(4, 0, -1):
+        p.setBrush(QColor(20, 24, 33, 10))
+        p.drawRoundedRect(r.adjusted(-k, -k + 3, k, k + 3), r.height() / 2 + k, r.height() / 2 + k)
+    p.setBrush(PILL_BG)
+    p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+
+
+def paint_keys(p: QPainter, keys: list[tuple[str, str]], cx: float, y: float, max_w: float) -> None:
+    """The key hints pill, centred on cx: bold key, muted label."""
+    f, bold = _font(11.5), _font(11.5, QFont.Weight.Bold)
+    fm, fb = QFontMetricsF(f), QFontMetricsF(bold)
+    total = sum(fb.horizontalAdvance(k) + 4 + fm.horizontalAdvance(lbl) + 14 for k, lbl in keys) + 12
+    r = QRectF(max(10.0, cx - total / 2), y, min(total, max_w), 28)
+    paint_pill(p, r)
+    x = r.left() + 12
+    for k, lbl in keys:
+        p.setFont(bold)
+        p.setPen(INK)
+        p.drawText(QPointF(x, r.top() + 18.5), k)
+        x += fb.horizontalAdvance(k) + 4
+        p.setFont(f)
+        p.setPen(MUTED)
+        p.drawText(QPointF(x, r.top() + 18.5), lbl)
+        x += fm.horizontalAdvance(lbl) + 14
+
+
+def paint_message(p: QPainter, msg: str, error: bool, cx: float, y: float, max_w: float) -> None:
+    """A one-line message pill, centred on cx."""
+    f = _font(12.5, QFont.Weight.DemiBold)
+    fm = QFontMetricsF(f)
+    text = fm.elidedText(msg, Qt.TextElideMode.ElideRight, max_w)
+    w = fm.horizontalAdvance(text) + 32
+    r = QRectF(max(10.0, cx - w / 2), y, w, 30)
+    paint_pill(p, r)
+    p.setFont(f)
+    p.setPen(DANGER if error else INK)
+    p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
+
+
 class _Art:
     """A card's screenshot, cropped to cover the card, and a tint taken from it for the glow."""
 
@@ -206,6 +258,7 @@ class ReviewOverlay(QWidget):
         self.model.run_async = self._run_async
         self._async_done.connect(lambda cb: cb())
         self.fg_hwnd = 0
+        self.work: Optional[dict] = None
         self._art: dict[str, _Art] = {}
 
         # One clock drives the card leaving (or coming back) and the stack sliding along.
@@ -278,7 +331,7 @@ class ReviewOverlay(QWidget):
         if self.isVisible():
             self.hide_overlay()
             return
-        self.fg_hwnd = fg_hwnd
+        self.fg_hwnd, self.work = fg_hwnd, work
         try:
             self.model.open(active_session_id, window)
         except Exception as e:  # noqa: BLE001 - show the problem instead of failing silently
@@ -293,14 +346,14 @@ class ReviewOverlay(QWidget):
         self._focus()
         self.timer.start()
 
-    def hide_overlay(self) -> None:
+    def hide_overlay(self, restore: bool = True) -> None:
         """Esc from anywhere: hide, keeping the current card, mode and any unsaved text."""
         self.timer.stop()
         self.anim.stop()
         self.anim_kind, self.moving = None, None
         self.drag, self.drag_start, self.dragging = QPointF(0, 0), None, False
         self.hide()
-        if self.fg_hwnd:
+        if restore and self.fg_hwnd:
             win32.restore_foreground(self.fg_hwnd)
 
     def _place(self, work: Optional[dict]) -> None:
@@ -519,14 +572,7 @@ class ReviewOverlay(QWidget):
         self._paint_footer(p)
         p.end()
 
-    @staticmethod
-    def _shadow(p: QPainter, rect: QRectF, tint: QColor, strength: float) -> None:
-        p.setPen(Qt.PenStyle.NoPen)
-        for k in range(10, 0, -1):
-            c = QColor(tint)
-            c.setAlphaF(0.024 * strength)
-            p.setBrush(c)
-            p.drawRoundedRect(rect.adjusted(-k * 2.2, -k * 1.2 + 10, k * 2.2, k * 3 + 10), RADIUS + k * 2, RADIUS + k * 2)
+    _shadow = staticmethod(paint_shadow)
 
     def _paint_card(self, p: QPainter, c: dict, cx: float, cy: float, scale: float, opacity: float, rot: float,
                     front: bool, editing: bool = False) -> None:
@@ -741,14 +787,7 @@ class ReviewOverlay(QWidget):
             p.drawText(QPointF(x, r.bottom() - 20), "Ctrl+Enter saves, then S sends it back")
 
     # -------------------------------------------------------------- header and footer pills
-    @staticmethod
-    def _pill(p: QPainter, r: QRectF) -> None:
-        p.setPen(Qt.PenStyle.NoPen)
-        for k in range(4, 0, -1):
-            p.setBrush(QColor(20, 24, 33, 10))
-            p.drawRoundedRect(r.adjusted(-k, -k + 3, k, k + 3), r.height() / 2 + k, r.height() / 2 + k)
-        p.setBrush(PILL_BG)
-        p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+    _pill = staticmethod(paint_pill)
 
     def _paint_header(self, p: QPainter) -> None:
         m = self.model
@@ -802,31 +841,8 @@ class ReviewOverlay(QWidget):
         y = TOP + CARD_H + 18
         msg = m.error or m.message
         if msg:
-            f = _font(12.5, QFont.Weight.DemiBold)
-            fm = QFontMetricsF(f)
-            text = fm.elidedText(msg, Qt.TextElideMode.ElideRight, W - 80)
-            w = fm.horizontalAdvance(text) + 32
-            r = QRectF(max(10.0, CX + 12 - w / 2), y, w, 30)
-            self._pill(p, r)
-            p.setFont(f)
-            p.setPen(DANGER if m.error else INK)
-            p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
-        keys = self._keys()
-        f, bold = _font(11.5), _font(11.5, QFont.Weight.Bold)
-        fm, fb = QFontMetricsF(f), QFontMetricsF(bold)
-        total = sum(fb.horizontalAdvance(k) + 4 + fm.horizontalAdvance(lbl) + 14 for k, lbl in keys) + 12
-        r = QRectF(max(10.0, CX + 12 - total / 2), y + 40, min(total, W - 20), 28)
-        self._pill(p, r)
-        x = r.left() + 12
-        for k, lbl in keys:
-            p.setFont(bold)
-            p.setPen(INK)
-            p.drawText(QPointF(x, r.top() + 18.5), k)
-            x += fb.horizontalAdvance(k) + 4
-            p.setFont(f)
-            p.setPen(MUTED)
-            p.drawText(QPointF(x, r.top() + 18.5), lbl)
-            x += fm.horizontalAdvance(lbl) + 14
+            paint_message(p, msg, bool(m.error), CX + 12, y, W - 80)
+        paint_keys(p, self._keys(), CX + 12, y + 40, W - 20)
 
     def _keys(self) -> list[tuple[str, str]]:
         mode = self.model.mode

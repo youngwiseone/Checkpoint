@@ -32,7 +32,7 @@ function Shortcuts({ s }: { s: Settings }) {
   const { data: state } = useAppState();
   const toast = useToast();
   const bindings = state?.desktop.hotkeys.bindings ?? [];
-  const labels: Record<string, string> = { capture: "Capture screenshot", capture_context: "Screenshot + always ask for a note", quick_note: "Text-only quick note", start_session: "Start session (press twice to end)", review: "Review overlay" };
+  const labels: Record<string, string> = { capture: "Capture screenshot", capture_context: "Screenshot + always ask for a note", quick_note: "Text-only quick note", start_session: "Start session (press twice to end)", review: "Review overlay", switch_project: "Switch or set up a project" };
   const save = () => patch.mutate({ hotkeys: hk }, {
     onSuccess: (r) => {
       if (r.hotkeys && !r.hotkeys.ok) toast("warning", `Some shortcuts couldn't be registered: ${r.hotkeys.reason}`);
@@ -45,7 +45,7 @@ function Shortcuts({ s }: { s: Settings }) {
         <h3>Global shortcuts</h3>
         <p className="text-2 small">Registered with Windows so they work in games and other apps. Use F-keys, or combine a key with Ctrl/Alt/Shift (e.g. <code>Ctrl+Alt+S</code>).</p>
         {!state?.desktop.available && <Banner kind="warn">The desktop helper isn't running, so shortcuts aren't active. Launch with <code>start.cmd</code>.</Banner>}
-        {(["capture", "capture_context", "quick_note", "start_session", "review"] as const).map((k) => {
+        {(["capture", "capture_context", "quick_note", "start_session", "review", "switch_project"] as const).map((k) => {
           const b = bindings.find((x) => x.action === k);
           return (
             <div key={k} className="row">

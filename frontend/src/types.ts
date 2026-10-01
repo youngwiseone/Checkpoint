@@ -315,7 +315,7 @@ export interface AudioDevices {
 
 export interface Settings {
   first_run_complete: boolean;
-  hotkeys: { capture: string; capture_context: string; quick_note: string; start_session: string; review: string };
+  hotkeys: { capture: string; capture_context: string; quick_note: string; start_session: string; review: string; switch_project: string };
   capture: { always_ask_context: boolean; region: "foreground_monitor" | "foreground_window"; debounce_ms: number };
   audio: {
     mic_enabled: boolean;

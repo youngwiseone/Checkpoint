@@ -29,6 +29,7 @@ from ..core import get_core
 from ..events import hooks, notices
 from ..settings_store import get_settings
 from .overlay import ReviewOverlay
+from .switcher import ProjectSwitcher
 from .windows import NoteWindow, Toast
 
 log = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class Bridge(QObject):
     state_changed = Signal()
     offer_requested = Signal(dict)
     review_requested = Signal(dict)
+    switch_requested = Signal(dict)
 
 
 class DesktopHost:
@@ -76,6 +78,9 @@ class DesktopHost:
         self.toast = Toast()
         self.overlay = ReviewOverlay(self.core.previews)
         self.bridge.review_requested.connect(self._toggle_overlay)
+        self.switcher = ProjectSwitcher(self.core.sessions, self._switched)
+        self.switcher.model.on_switched = self._on_switched
+        self.bridge.switch_requested.connect(self._toggle_switcher)
         self.bridge.note_requested.connect(self.note_window.open_for)
         self.bridge.toast_requested.connect(lambda lvl, msg, work: self.toast.show_message(lvl, msg, work))
         self.bridge.state_changed.connect(self._refresh_tray)
@@ -133,8 +138,8 @@ class DesktopHost:
     def _on_hotkey(self, action: str) -> None:
         """Runs on the hotkey thread. Capture first, UI after."""
         mono = time.monotonic()
-        if action == "review":
-            self._review_hotkey()
+        if action in ("review", "switch_project"):
+            self._overlay_hotkey(action)
             return
         if self.note_window.isVisible():
             # Never capture our own popup; ask the user to finish the open note.
@@ -159,8 +164,8 @@ class DesktopHost:
             })
 
     # ------------------------------------------------------------ review overlay
-    def _review_hotkey(self) -> None:
-        """Hotkey thread: note what's in the foreground (to infer the project), then show the overlay."""
+    def _overlay_hotkey(self, action: str) -> None:
+        """Hotkey thread: note what's in the foreground (to infer the project), then show the overlay or switcher."""
         from ..capture import win32
 
         fg = win32.foreground_info()
@@ -168,7 +173,8 @@ class DesktopHost:
         window = None
         if fg is not None and not own:
             window = win32.foreground_window()
-        self.bridge.review_requested.emit({
+        signal = self.bridge.review_requested if action == "review" else self.bridge.switch_requested
+        signal.emit({
             "window": window, "fg_hwnd": fg.hwnd if fg and not own else 0,
             "work_rect": fg.work_rect.as_mss() if fg and fg.work_rect else None,
         })
@@ -177,8 +183,35 @@ class DesktopHost:
         if self.note_window.isVisible():
             hooks.emit_toast("warning", "Finish or press Esc on the open note first.")
             return
+        if self.switcher.isVisible():  # pressed over the switcher: take over the window it came from
+            payload = {**payload, "fg_hwnd": payload.get("fg_hwnd") or self.switcher.fg_hwnd,
+                       "work_rect": payload.get("work_rect") or self.switcher.work}
+            self.switcher.hide_switcher(restore=False)
         a = self.core.sessions.active
         self.overlay.toggle(a.id if a else None, payload.get("window"), payload.get("work_rect"), payload.get("fg_hwnd") or 0)
+
+    # ------------------------------------------------------------ project switcher
+    def _toggle_switcher(self, payload: dict) -> None:
+        if self.note_window.isVisible():
+            hooks.emit_toast("warning", "Finish or press Esc on the open note first.")
+            return
+        if self.overlay.isVisible():  # pressed over the review overlay: take over the window it came from
+            payload = {**payload, "fg_hwnd": payload.get("fg_hwnd") or self.overlay.fg_hwnd,
+                       "work_rect": payload.get("work_rect") or self.overlay.work}
+            self.overlay.hide_overlay(restore=False)
+        self.switcher.toggle(payload.get("window"), payload.get("work_rect"), payload.get("fg_hwnd") or 0)
+
+    def _on_switched(self, _pid: str, _sid: str, ended: Optional[str]) -> None:
+        self.core.appwatch.dismiss()
+        if ended:
+            self.core.transcriber.wake()
+            self.core.organiser.wake()
+        self.bridge.state_changed.emit()
+
+    def _switched(self, msg: str, work: Optional[dict]) -> None:
+        st = self.core.sessions.status()
+        srcs = ", ".join(s["label"] for s in st.get("sources", [])) or "no audio"
+        self.toast.show_message("success", f"{msg} · {srcs}", work)
 
     # ------------------------------------------------------------ one-key sessions
     def _hotkey_label(self) -> str:
@@ -271,13 +304,14 @@ class DesktopHost:
         self.act_status.setEnabled(False)
         self.act_start = QAction("Start session", triggered=lambda: self._quick_start())
         self.act_review = QAction("Review and send…", triggered=lambda: self._toggle_overlay({}))
+        self.act_switch = QAction("Switch project…", triggered=lambda: self._toggle_switcher({}))
         self.act_pause = QAction("Pause recording", triggered=self._toggle_pause)
         self.act_mic = QAction("Record microphone", checkable=True, triggered=lambda on: self._toggle_source("mic", on))
         self.act_loop = QAction("Record computer audio", checkable=True, triggered=lambda on: self._toggle_source("loopback", on))
         self.act_auto = QAction("Auto screenshots", checkable=True, triggered=self._toggle_auto)
         self.act_end = QAction("End session", triggered=self._end_session)
         self.act_quit = QAction("Quit", triggered=self.quit)
-        for a in (self.act_open, self.act_review, None, self.act_status, self.act_start, self.act_pause, self.act_mic, self.act_loop, self.act_auto,
+        for a in (self.act_open, self.act_review, self.act_switch, None, self.act_status, self.act_start, self.act_pause, self.act_mic, self.act_loop, self.act_auto,
                   self.act_end, None, self.act_quit):
             if a is None:
                 menu.addSeparator()
@@ -303,6 +337,7 @@ class DesktopHost:
             n = 0
         hk = get_settings().hotkeys.review
         self.act_review.setText(f"Review and send ({n} waiting)  ({hk})" if n else f"Review and send  ({hk})")
+        self.act_switch.setText(f"Switch project…  ({get_settings().hotkeys.switch_project})")
         for a in (self.act_pause, self.act_mic, self.act_loop, self.act_auto, self.act_end):
             a.setVisible(live)
         self.act_start.setVisible(not live)
@@ -422,7 +457,7 @@ class DesktopHost:
         def bindings() -> dict[str, str]:
             hk = get_settings().hotkeys
             return {"capture": hk.capture, "capture_context": hk.capture_context, "quick_note": hk.quick_note,
-                    "start_session": hk.start_session, "review": hk.review}
+                    "start_session": hk.start_session, "review": hk.review, "switch_project": hk.switch_project}
 
         self.hotkeys = HotkeyThread(bindings, self._on_hotkey)
         self.hotkeys.start()

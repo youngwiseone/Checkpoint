@@ -264,25 +264,12 @@ def patch_project(pid: str, body: ProjectPatch) -> dict:
         p = s.get(Project, pid)
         if p is None:
             raise HTTPException(404, "Project not found")
-        patch = body.model_dump(exclude_none=True)
-        if patch.get("default_agent") not in (None, "none", "claude", "codex"):
-            raise HTTPException(400, "Unknown agent")
-        if patch.get("agent_access") not in (None, "standard", "full"):
-            raise HTTPException(400, "Unknown access level")
-        if patch.get("repo_path"):
-            from ..services.workspace import GitError, inspect_repo
+        from ..services.projects import ProjectError, apply_patch
 
-            try:
-                patch["repo_path"] = inspect_repo(patch["repo_path"]).root
-            except GitError as e:
-                raise HTTPException(400, str(e)) from e
-            if patch["repo_path"] != p.repo_path and "base_branch" not in patch:
-                patch["base_branch"] = ""  # a branch of the old repo means nothing in the new one
-        for k, v in patch.items():
-            setattr(p, k, (v.strip() or None) if k in ("repo_path", "base_branch") and isinstance(v, str)
-                    else (v.strip() if isinstance(v, str) else v))
-        if not p.name:
-            raise HTTPException(400, "Name can't be empty")
+        try:
+            apply_patch(p, body.model_dump(exclude_none=True))
+        except ProjectError as e:
+            raise HTTPException(400, str(e)) from e
         s.flush()
         return project_dict(s, p)
 

@@ -19,6 +19,7 @@ class HotkeySettings(BaseModel):
     quick_note: str = "F9"
     start_session: str = "Ctrl+F8"  # start a session (the offered project, else the last one); press twice quickly to end
     review: str = "Ctrl+F9"  # the keyboard-first review overlay
+    switch_project: str = "Shift+F9"  # switch project, or set up a new one, and start a session there
 
 
 class CaptureSettings(BaseModel):

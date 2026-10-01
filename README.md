@@ -38,6 +38,7 @@ for troubleshooting.
 | **F9** | Text-only quick note. |
 | **Ctrl+F8** | Start a session for the current project with the same setup as its last session. Press twice within 3 s to end it. |
 | **Ctrl+F9** | Review overlay: one card at a time, then send what you approved to the project's coding agent. |
+| **Shift+F9** | Switch project: pick one (or type to filter) and a session starts there, ending the running one. Or set up a new project, prefilled from the last one. |
 
 **Set and forget:** pick the project in the sidebar and press **Start session** (or **Ctrl+F8** anywhere). Each
 session starts like the project's previous one (audio sources, devices, labels, transcription, auto screenshots).
@@ -45,6 +46,14 @@ Under **Offer a session when a program starts…**, pick the program you test (b
 editors). When it opens, Checkpoint shows a toast and a tray message; press **Ctrl+F8** or click the message to
 start. While a session runs, the chips on the Session page and the tray menu turn the microphone, computer audio,
 live transcript and auto screenshots on or off immediately.
+
+**Switch projects with Shift+F9.** A card floats beside your work listing your projects, most recently used first,
+with the one recording now and the one whose program is in the foreground marked. Type to filter, **↑/↓** (or hover)
+to pick, **Enter** (or click) to start a session there: a running session in another project ends first. The last
+row, **Ctrl+N** or **Tab** sets up a **new project** with the same settings as the last active one (agent, access,
+setup / check / preview commands, what to record), a repo folder next to the last one's when one matches the name,
+and the program in the foreground. Change anything, then **Enter** creates it and starts a session. **Alt+←** goes
+back to the list, **Esc** hides it and keeps a half-filled new project for next time.
 
 In the note window, **Ctrl+Enter** saves, **Enter** adds a new line, **Esc** keeps the screenshot in
 *Unfinished captures* without creating a card, **Discard** removes it. Focus returns to your app.
