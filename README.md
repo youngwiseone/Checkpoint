@@ -129,6 +129,9 @@ through them in order and report back at the end:
 
 Checkpoint never uploads anything itself, and audio or full transcripts are never included.
 
+**Appearance.** Night blue by default; Settings → General → Appearance switches everything (the web app, the F9 note
+window, toasts and the Ctrl+F9 / Shift+F9 cards) to the light look.
+
 ## Optional features
 
 - **Transcription** — Settings → Transcription → Download `base.en` (~145 MB, one-time). Runs on CPU (int8);

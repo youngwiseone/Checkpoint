@@ -332,6 +332,7 @@ export interface Settings {
   app_watch: { enabled: boolean; rules: WatchRule[] };
   sharing: { server_url: string; display_name: string; allow_insecure_private_network: boolean };
   agents: { claude_path: string; codex_path: string };
+  appearance: { theme: "dark" | "light" };
   last_project_id: string | null;
   data_dir: string;
 }

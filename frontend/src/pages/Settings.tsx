@@ -9,6 +9,7 @@ import { Banner, Spinner, Toggle, fmtBytes, useToast } from "../components/ui";
 import { useAppState, useProjects } from "../state";
 import { ReadinessList } from "./Welcome";
 import { AgentPaths, ProjectSetupForm } from "../components/ProjectSetup";
+import { applyTheme, type Theme } from "../theme";
 
 type Tab = "general" | "projects" | "shortcuts" | "transcription" | "ai" | "assistants" | "sharing" | "storage";
 
@@ -430,6 +431,42 @@ function Projects({ s, focus }: { s: Settings; focus: string | null }) {
   );
 }
 
+function Appearance({ s }: { s: Settings }) {
+  const patch = usePatch();
+  const current: Theme = s.appearance?.theme === "light" ? "light" : "dark";
+  const [picked, setPicked] = useState<Theme>(current);
+  useEffect(() => setPicked(current), [current]);
+  const choose = (theme: Theme) => {
+    if (theme === picked) return;
+    setPicked(theme);
+    applyTheme(theme); // instant; the settings refetch confirms it
+    patch.mutate({ appearance: { theme } }, { onError: () => { setPicked(current); applyTheme(current); } });
+  };
+  const options: [Theme, string][] = [["dark", "Night blue"], ["light", "Light"]];
+  return (
+    <div className="card stack">
+      <div>
+        <h3>Appearance</h3>
+        <p className="hint" style={{ marginTop: 2 }}>Also used by the F9 note window and the Ctrl+F9 / Shift+F9 cards.</p>
+      </div>
+      <div className="theme-picker" role="radiogroup" aria-label="Theme">
+        {options.map(([k, label]) => (
+          <button key={k} type="button" role="radio" aria-checked={picked === k} className={`theme-swatch ${picked === k ? "on" : ""}`} onClick={() => choose(k)}>
+            <span className={`swatch-preview ${k}`} aria-hidden>
+              <span className="sp-side" />
+              <span className="sp-main"><span className="sp-line" /><span className="sp-line short" /><span className="sp-btn" /></span>
+            </span>
+            <span className="row" style={{ gap: 8 }}>
+              <span className="swatch-radio" aria-hidden />
+              <span className="label">{label}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const tab: Tab = (params.get("tab") as Tab) || "general";
@@ -443,7 +480,8 @@ export default function SettingsPage() {
       <div className="tabs" role="tablist">{tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{l}</button>)}</div>
       {!s.data ? <Spinner /> : (
         <>
-          {tab === "general" && <div className="card"><div className="card-head"><h3>Readiness</h3></div><ReadinessList /></div>}
+          {tab === "general" && <Appearance s={s.data} />}
+          {tab === "general" && <div className="card" style={{ marginTop: 16 }}><div className="card-head"><h3>Readiness</h3></div><ReadinessList /></div>}
           {tab === "projects" && <Projects s={s.data} focus={params.get("project")} />}
           {tab === "shortcuts" && <Shortcuts s={s.data} />}
           {tab === "transcription" && <Transcription s={s.data} />}

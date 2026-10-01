@@ -12,6 +12,7 @@ import SessionDetail from "./pages/SessionDetail";
 import Items from "./pages/Items";
 import SettingsPage from "./pages/Settings";
 import type { Project } from "./types";
+import { useThemeSync } from "./theme";
 
 function SignedOut() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
   const auth = useQuery({ queryKey: ["auth"], queryFn: () => api.get<{ authenticated: boolean }>("/api/auth/status"), staleTime: 60_000 });
   const { data: state, error } = useAppState();
   useNoticeToasts(state);
+  useThemeSync();
 
   if (auth.isLoading) return <div style={{ padding: 40 }}><Spinner label="Loading…" /></div>;
   if (auth.data && !auth.data.authenticated) return <SignedOut />;

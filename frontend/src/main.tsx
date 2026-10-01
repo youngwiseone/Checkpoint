@@ -5,6 +5,9 @@ import { HashRouter } from "react-router-dom";
 import App from "./App";
 import { ToastProvider } from "./components/ui";
 import "./styles.css";
+import { applyCachedTheme } from "./theme";
+
+applyCachedTheme();
 
 const client = new QueryClient({
   defaultOptions: {

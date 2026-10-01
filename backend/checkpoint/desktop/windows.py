@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional
 
-from PySide6.QtCore import QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, QRectF, Qt, QTimer
+from PySide6.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -18,35 +18,38 @@ from PySide6.QtWidgets import (
 )
 
 from ..capture import win32
+from . import colors
+from .colors import Colors, css
 
-BG = "#15171c"
-SURFACE = "#1d2027"
-SURFACE2 = "#262a33"
-BORDER = "#343a47"
-TEXT = "#e8e9ec"
-MUTED = "#b0b5c1"
-ACCENT = "#5b8cff"
-DANGER = "#f07171"
-SUCCESS = "#4cc38a"
-WARN = "#e0a84e"
+RADIUS = 18  # matches the feel of the overlay's cards
 
-STYLE = f"""
-QWidget#root {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 12px; }}
-QLabel {{ color: {TEXT}; font-size: 15px; }}
-QLabel#muted {{ color: {MUTED}; font-size: 13px; }}
+
+def note_css(c: Colors) -> str:
+    """The note window in the current theme: a night-blue card, or the light card look."""
+    return f"""
+QWidget#root {{ background: {css(c.card)}; border: 1px solid {css(c.border)}; border-radius: {RADIUS}px; }}
+QLabel {{ color: {css(c.text)}; font-size: 15px; }}
+QLabel#muted {{ color: {css(c.muted)}; font-size: 13px; }}
 QLabel#title {{ font-size: 16px; font-weight: 600; }}
-QLabel#error {{ color: {DANGER}; font-size: 13px; }}
-QPlainTextEdit {{ background: {BG}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 8px;
-                  font-size: 15px; selection-background-color: {ACCENT}; }}
-QPlainTextEdit:focus {{ border: 1px solid {ACCENT}; }}
-QComboBox {{ background: {SURFACE2}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 5px 10px; font-size: 14px; }}
-QComboBox:focus {{ border: 1px solid {ACCENT}; }}
-QComboBox QAbstractItemView {{ background: {SURFACE2}; color: {TEXT}; selection-background-color: {ACCENT}; }}
-QPushButton {{ background: {SURFACE2}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 8px; padding: 7px 14px; font-size: 14px; }}
-QPushButton:hover {{ border-color: {MUTED}; }}
-QPushButton:focus {{ border: 1px solid {ACCENT}; }}
-QPushButton#primary {{ background: {ACCENT}; border-color: {ACCENT}; color: white; font-weight: 600; }}
-QPushButton#danger {{ color: {DANGER}; }}
+QLabel#error {{ color: {css(c.danger)}; font-size: 13px; }}
+QLabel#thumb {{ background: {css(c.field)}; border: 1px solid {css(c.border)}; border-radius: 10px; }}
+QPlainTextEdit {{ background: {css(c.field)}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 10px; padding: 8px;
+                  font-size: 15px; selection-background-color: {css(c.accent)}; selection-color: {css(c.on_accent)}; }}
+QPlainTextEdit:focus {{ border: 1px solid {css(c.accent)}; }}
+QComboBox {{ background: {css(c.button)}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 10px; padding: 5px 10px;
+             font-size: 14px; }}
+QComboBox:focus {{ border: 1px solid {css(c.accent)}; }}
+QComboBox::drop-down {{ border: none; width: 28px; }}
+QComboBox::down-arrow {{ image: url({colors.arrow_icon(c.muted)}); width: 10px; height: 6px; margin-right: 6px; }}
+QComboBox QAbstractItemView {{ background: {css(c.surface_2)}; color: {css(c.text)}; selection-background-color: {css(c.accent)};
+                               selection-color: {css(c.on_accent)}; }}
+QPushButton {{ background: {css(c.button)}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 10px; padding: 7px 14px;
+               font-size: 14px; }}
+QPushButton:hover {{ border-color: {css(c.border_strong)}; }}
+QPushButton:focus {{ border: 1px solid {css(c.accent)}; }}
+QPushButton#primary {{ background: {css(c.accent)}; border-color: {css(c.accent)}; color: {css(c.on_accent)}; font-weight: 600; }}
+QPushButton#primary:hover {{ background: {css(c.accent_strong)}; border-color: {css(c.accent_strong)}; }}
+QPushButton#danger {{ color: {css(c.danger)}; }}
 """
 
 CATEGORIES = [("", "No category"), ("bug", "Bug"), ("improvement", "Improvement"), ("idea", "Idea"),
@@ -74,8 +77,9 @@ class NoteWindow(QWidget):
         self.on_save, self.on_keep, self.on_discard = on_save, on_keep, on_discard
         self.payload: dict = {}
         self._esc_armed = 0.0
-        self.setStyleSheet(STYLE)
-        root = QWidget(self)
+        self._theme = ""
+        self._apply_theme()
+        root = self.root = QWidget(self)
         root.setObjectName("root")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -89,9 +93,9 @@ class NoteWindow(QWidget):
         self.sub.setObjectName("muted")
         self.sub.setWordWrap(True)
         self.thumb = QLabel()
+        self.thumb.setObjectName("thumb")
         self.thumb.setFixedHeight(170)
         self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumb.setStyleSheet(f"background:{BG}; border:1px solid {BORDER}; border-radius:8px;")
         self.prompt = QLabel("What should we remember about this?")
         self.text = QPlainTextEdit()
         self.text.setPlaceholderText("Describe what you noticed…")
@@ -133,7 +137,15 @@ class NoteWindow(QWidget):
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, activated=self._keep)
 
     # ------------------------------------------------------------ show
+    def _apply_theme(self) -> None:
+        """Restyle when the theme changed since the window was last shown."""
+        c = colors.current()
+        if c.name != self._theme:
+            self._theme = c.name
+            self.setStyleSheet(note_css(c))
+
     def open_for(self, payload: dict) -> None:
+        self._apply_theme()
         self.payload = payload
         is_capture = bool(payload.get("id"))
         self.text.clear()
@@ -156,7 +168,7 @@ class NoteWindow(QWidget):
             self.thumb.hide()
             self.keep_btn.setText("Cancel  (Esc)")
             self.discard_btn.hide()
-        self.adjustSize()
+        self._fit()
         self._place(payload.get("work_rect"))
         self.show()
         win32.exclude_from_capture(int(self.winId()))
@@ -184,10 +196,18 @@ class NoteWindow(QWidget):
         self.payload = {}
 
     # ------------------------------------------------------------ actions
+    def _fit(self) -> None:
+        """Resize to the content. The layouts keep their old size until their posted relayout runs, so flush it
+        first: otherwise the window keeps the previous note's height (cutting off the thumbnail, or leaving a gap)."""
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+        self.root.layout().activate()
+        self.layout().activate()
+        self.resize(self.width(), self.sizeHint().height())
+
     def _show_error(self, msg: str) -> None:
         self.error.setText(msg)
         self.error.show()
-        self.adjustSize()
+        self._fit()
 
     def _save(self) -> None:
         text = self.text.toPlainText()
@@ -241,20 +261,20 @@ class Toast(QWidget):
         self.level = "info"
 
     def paintEvent(self, _e) -> None:  # noqa: ANN001, N802
+        c = colors.current()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QColor(SURFACE))
-        p.setPen(QColor(BORDER))
-        p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 10, 10)
-        color = {"success": SUCCESS, "warning": WARN, "error": DANGER}.get(self.level, ACCENT)
-        p.setBrush(QColor(color))
+        p.setBrush(c.card)
+        p.setPen(c.border)
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 14, 14)
+        p.setBrush({"success": c.success, "warning": c.warn, "error": c.danger}.get(self.level, c.accent))
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(14, self.height() // 2 - 5, 10, 10)
 
     def show_message(self, level: str, message: str, work: Optional[dict] = None, duration_ms: Optional[int] = None) -> None:
         self.level = level
         self.label.setText(message)
-        self.label.setStyleSheet(f"color:{TEXT};")
+        self.label.setStyleSheet(f"color:{css(colors.current().text)};")
         self.label.setFixedWidth(320)
         self.label.adjustSize()
         self.resize(self.label.width() + 50, max(44, self.label.height() + 22))

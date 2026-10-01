@@ -42,22 +42,15 @@ from PySide6.QtWidgets import QLineEdit, QPlainTextEdit, QWidget
 
 from ..capture import win32
 from ..services.overlay_model import OverlayModel
+from . import colors
+from .colors import Colors, css
+from .colors import mix as _mix
 from .windows import logical_point_for_physical
 
-# A light, airy card (it has to read well over any game or app).
-INK = QColor("#151821")
-MUTED = QColor("#6b7280")
-FAINT = QColor("#9aa1ae")
-CARD = QColor("#f8f9fc")
-LINE = QColor(20, 24, 33, 22)
-ACCENT = QColor("#4f7bff")
-SUCCESS = QColor("#16a05a")
-WARN = QColor("#d48806")
-DANGER = QColor("#e5484d")
-PILL_BG = QColor(255, 255, 255, 236)
-
-STATE_COLOR = {"approved": MUTED, "sending": ACCENT, "sent": ACCENT, "working": ACCENT, "checking": ACCENT,
-               "ready": SUCCESS, "needs_you": WARN, "merged": FAINT, "done": FAINT}
+# Colours come from the theme (colors.current()) at paint time: night blue by default, or the
+# light card look. Either way the cards have to read well over any game or app.
+STATE_COLOR = {"approved": "muted", "sending": "accent", "sent": "accent", "working": "accent", "checking": "accent",
+               "ready": "success", "needs_you": "warn", "merged": "faint", "done": "faint"}
 TYPE_LABEL = {"bug": "Bug", "improvement": "Improvement", "idea": "Idea", "task": "Task", "question": "Question", "note": "Note"}
 ORIGIN = {"suggestion": "From what you said", "typed": "Your note", "quick": "Quick note", "ai": "Organised by local AI",
           "manual": "Added by you"}
@@ -84,11 +77,6 @@ def _font(px: float, weight: QFont.Weight = QFont.Weight.Normal, italic: bool = 
     f.setWeight(weight)
     f.setItalic(italic)
     return f
-
-
-def _mix(a: QColor, b: QColor, t: float) -> QColor:
-    return QColor(int(a.red() + (b.red() - a.red()) * t), int(a.green() + (b.green() - a.green()) * t),
-                  int(a.blue() + (b.blue() - a.blue()) * t), int(a.alpha() + (b.alpha() - a.alpha()) * t))
 
 
 def _ease(t: float) -> float:
@@ -142,27 +130,37 @@ def draw_lines(p: QPainter, text: str, font: QFont, color: QColor, x: float, y: 
 
 
 def paint_shadow(p: QPainter, rect: QRectF, tint: QColor, strength: float) -> None:
-    """The soft, tinted glow under a card."""
+    """The soft, tinted glow under a card. In the dark theme a deeper shadow sits under the glow."""
+    c = colors.current()
     p.setPen(Qt.PenStyle.NoPen)
-    for k in range(10, 0, -1):
-        c = QColor(tint)
-        c.setAlphaF(0.024 * strength)
-        p.setBrush(c)
-        p.drawRoundedRect(rect.adjusted(-k * 2.2, -k * 1.2 + 10, k * 2.2, k * 3 + 10), RADIUS + k * 2, RADIUS + k * 2)
+    layers = [(c.shadow, 0.05)] if c.dark else []
+    for color, a in layers + [(tint, 0.018 if c.dark else 0.024)]:
+        for k in range(10, 0, -1):
+            col = QColor(color)
+            col.setAlphaF(a * strength)
+            p.setBrush(col)
+            p.drawRoundedRect(rect.adjusted(-k * 2.2, -k * 1.2 + 10, k * 2.2, k * 3 + 10), RADIUS + k * 2, RADIUS + k * 2)
 
 
 def paint_pill(p: QPainter, r: QRectF) -> None:
-    """A floating white pill (header, messages, key hints)."""
+    """A floating pill (header, messages, key hints)."""
+    c = colors.current()
+    rad = r.height() / 2
     p.setPen(Qt.PenStyle.NoPen)
     for k in range(4, 0, -1):
-        p.setBrush(QColor(20, 24, 33, 10))
-        p.drawRoundedRect(r.adjusted(-k, -k + 3, k, k + 3), r.height() / 2 + k, r.height() / 2 + k)
-    p.setBrush(PILL_BG)
-    p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+        p.setBrush(c.lift)
+        p.drawRoundedRect(r.adjusted(-k, -k + 3, k, k + 3), rad + k, rad + k)
+    p.setBrush(c.pill)
+    p.drawRoundedRect(r, rad, rad)
+    if c.dark:  # a faint edge so the pill holds its shape over dark games
+        p.setPen(QPen(c.rim, 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), rad, rad)
 
 
 def paint_keys(p: QPainter, keys: list[tuple[str, str]], cx: float, y: float, max_w: float) -> None:
     """The key hints pill, centred on cx: bold key, muted label."""
+    c = colors.current()
     f, bold = _font(11.5), _font(11.5, QFont.Weight.Bold)
     fm, fb = QFontMetricsF(f), QFontMetricsF(bold)
     total = sum(fb.horizontalAdvance(k) + 4 + fm.horizontalAdvance(lbl) + 14 for k, lbl in keys) + 12
@@ -171,11 +169,11 @@ def paint_keys(p: QPainter, keys: list[tuple[str, str]], cx: float, y: float, ma
     x = r.left() + 12
     for k, lbl in keys:
         p.setFont(bold)
-        p.setPen(INK)
+        p.setPen(c.text)
         p.drawText(QPointF(x, r.top() + 18.5), k)
         x += fb.horizontalAdvance(k) + 4
         p.setFont(f)
-        p.setPen(MUTED)
+        p.setPen(c.muted)
         p.drawText(QPointF(x, r.top() + 18.5), lbl)
         x += fm.horizontalAdvance(lbl) + 14
 
@@ -188,8 +186,9 @@ def paint_message(p: QPainter, msg: str, error: bool, cx: float, y: float, max_w
     w = fm.horizontalAdvance(text) + 32
     r = QRectF(max(10.0, cx - w / 2), y, w, 30)
     paint_pill(p, r)
+    c = colors.current()
     p.setFont(f)
-    p.setPen(DANGER if error else INK)
+    p.setPen(c.danger if error else c.text)
     p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
 
 
@@ -278,15 +277,11 @@ class ReviewOverlay(QWidget):
         self.editor.setFrameStyle(0)
         self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.editor.setAccessibleName("Card text: the first line is the title")
-        self.editor.setStyleSheet("QPlainTextEdit { background: transparent; color: #151821; border: none; font-size: 15px;"
-                                  " selection-background-color: #4f7bff; selection-color: white; }")
         self.editor.textChanged.connect(
             lambda: self.model.typed(self.editor.toPlainText()) if self.model.mode in ("edit", "answer") else None)
         self.editor.hide()
         self.name_box = QLineEdit(self)
         self.name_box.setAccessibleName("Session name")
-        self.name_box.setStyleSheet("QLineEdit { background: white; color: #151821; border: 1px solid #4f7bff; border-radius: 10px;"
-                                    " padding: 4px 8px; font-size: 14px; font-weight: 600; }")
         self.name_box.textChanged.connect(lambda t: self.model.typed(t) if self.model.mode == "rename" else None)
         self.name_box.hide()
         self.filter = _TypingFilter(self)
@@ -296,8 +291,22 @@ class ReviewOverlay(QWidget):
         self.timer = QTimer(self, interval=1500, timeout=self._tick)
         self.msg_timer = QTimer(self, singleShot=True, interval=3500, timeout=self._clear_message)
         self._last_msg = ""
+        self.c: Colors = colors.current()
+        self._theme = ""
+        self._apply_theme()
 
     # -------------------------------------------------------------- plumbing
+    def _apply_theme(self) -> None:
+        """Pick up the current theme: the painted parts read self.c, the text boxes need new stylesheets."""
+        self.c = c = colors.current()
+        if c.name == self._theme:
+            return
+        self._theme = c.name
+        sel = f"selection-background-color: {css(c.accent)}; selection-color: {css(c.on_accent)};"
+        self.editor.setStyleSheet(f"QPlainTextEdit {{ background: transparent; color: {css(c.text)}; border: none; font-size: 15px; {sel} }}")
+        self.name_box.setStyleSheet(f"QLineEdit {{ background: {css(c.field)}; color: {css(c.text)}; border: 1px solid {css(c.accent)};"
+                                    f" border-radius: 10px; padding: 4px 8px; font-size: 14px; font-weight: 600; {sel} }}")
+
     def _run_async(self, fn, done) -> None:  # noqa: ANN001
         """Slow work (restarting the preview) off the UI thread; `done` runs back on it."""
         def work() -> None:
@@ -497,6 +506,7 @@ class ReviewOverlay(QWidget):
 
     # -------------------------------------------------------------- render: the widgets that sit on the canvas
     def render(self) -> None:
+        self._apply_theme()
         m = self.model
         mode = m.mode
         er = self._editor_rect()
@@ -577,6 +587,7 @@ class ReviewOverlay(QWidget):
     def _paint_card(self, p: QPainter, c: dict, cx: float, cy: float, scale: float, opacity: float, rot: float,
                     front: bool, editing: bool = False) -> None:
         art = self.art(c)
+        k = self.c
         p.save()
         p.setOpacity(max(0.0, min(1.0, opacity)))
         p.translate(cx, cy)
@@ -586,7 +597,7 @@ class ReviewOverlay(QWidget):
         self._shadow(p, r, art.tint, 1.0 if front else 0.45)
         path = QPainterPath()
         path.addRoundedRect(r, RADIUS, RADIUS)
-        bg = _mix(CARD, art.tint, 0.07)
+        bg = _mix(k.card, art.tint, 0.08 if k.dark else 0.07)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(bg)
         p.drawPath(path)
@@ -599,7 +610,7 @@ class ReviewOverlay(QWidget):
             p.drawPixmap(QRectF(r.left(), r.top(), CARD_W, img_h), art.cover, QRectF(0, src_y, art.cover.width(), src_h))
         else:  # no screenshot: a soft glow instead
             g = QRadialGradient(QPointF(0, r.top() + img_h * 0.4), CARD_W * 0.65)
-            g.setColorAt(0, _mix(art.tint, QColor("white"), 0.1))
+            g.setColorAt(0, _mix(art.tint, k.card, 0.45) if k.dark else _mix(art.tint, QColor("white"), 0.1))
             g.setColorAt(1, bg)
             p.fillRect(QRectF(r.left(), r.top(), CARD_W, img_h), g)
         fade = QLinearGradient(0, r.top() + img_h * 0.4, 0, r.top() + img_h + 1)
@@ -610,7 +621,7 @@ class ReviewOverlay(QWidget):
         fade.setColorAt(1, bg)
         p.fillRect(QRectF(r.left(), r.top() + img_h * 0.4, CARD_W, img_h * 0.6 + 2), fade)
         p.setClipping(False)
-        p.setPen(QPen(QColor(255, 255, 255, 170), 1))
+        p.setPen(QPen(k.rim, 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), RADIUS, RADIUS)
         if front:
@@ -631,42 +642,45 @@ class ReviewOverlay(QWidget):
         return w
 
     def _paint_card_body(self, p: QPainter, c: dict, r: QRectF, img_h: float, editing: bool) -> None:
+        k = self.c
         x, w = r.left() + 22, CARD_W - 44
         y = r.top() + img_h - (12 if editing else 20)
-        cw = self._chip(p, x, y, TYPE_LABEL.get(c["type"], c["type"]), INK, QColor(255, 255, 255, 235))
+        cw = self._chip(p, x, y, TYPE_LABEL.get(c["type"], c["type"]), k.text, k.chip)
         origin = ORIGIN.get(c["origin"], "")
         if origin:
             p.setFont(_font(12))
-            p.setPen(MUTED)
+            p.setPen(k.muted)
             p.drawText(QPointF(x + cw + 8, y + 15.5), origin)
         if editing:
             p.setFont(_font(12))
-            p.setPen(MUTED)
+            p.setPen(k.muted)
             p.drawText(QPointF(x, r.bottom() - 20), "Ctrl+Enter saves  ·  the first line is the title")
             return
         y += 34
-        y += draw_lines(p, c["title"], _font(20, QFont.Weight.Bold), INK, x, y, w, 3) + 6
+        y += draw_lines(p, c["title"], _font(20, QFont.Weight.Bold), k.text, x, y, w, 3) + 6
         desc = (c.get("description") or "").strip()
         if desc and desc != c["title"].strip():
-            y += draw_lines(p, desc, _font(13.5), MUTED, x, y, w, 3) + 6
+            y += draw_lines(p, desc, _font(13.5), k.text_2 if k.dark else k.muted, x, y, w, 3) + 6
         quotes = [q for q in c.get("quotes", []) if q.strip() and q.strip() not in desc]
         if quotes and y < r.bottom() - 110:
-            draw_lines(p, f"“{quotes[0]}”", _font(13, italic=True), FAINT, x, y, w, 2)
+            draw_lines(p, f"“{quotes[0]}”", _font(13, italic=True), k.muted if k.dark else k.faint, x, y, w, 2)
         sim = c.get("similar_to")
         note = c.get("uncertainty") if c.get("needs_context") else None
         if sim or note:
             text = f"Looks like {sim['code']}, already sent. Approving adds this to it as evidence." if sim else note
             box = QRectF(x - 6, r.bottom() - 96, w + 12, 40)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(212, 136, 6, 28))
+            p.setBrush(colors.alpha(k.warn, 34 if k.dark else 28))
             p.drawRoundedRect(box, 10, 10)
-            draw_lines(p, text, _font(12), WARN, box.left() + 10, box.top() + 4, box.width() - 20, 2)
+            draw_lines(p, text, _font(12), k.warn, box.left() + 10, box.top() + 4, box.width() - 20, 2)
+        if abs(self.drag.y()) >= 8 and not self.anim_kind:
+            return  # mid-swipe the Approve/Dismiss pill says it; don't repeat it in the action row
         fy = r.bottom() - 44
-        p.setPen(QPen(LINE, 1))
+        p.setPen(QPen(k.line, 1))
         p.drawLine(QPointF(r.left() + 18, fy - 4), QPointF(r.right() - 18, fy - 4))
         p.setFont(_font(12.5, QFont.Weight.DemiBold))
         cw = w / 3
-        for i, (label, col) in enumerate((("↑  Approve", SUCCESS), ("↓  Dismiss", DANGER), ("Click to edit", MUTED))):
+        for i, (label, col) in enumerate((("↑  Approve", k.success), ("↓  Dismiss", k.danger), ("Click to edit", k.muted))):
             p.setPen(col)
             p.drawText(QRectF(x + i * cw, fy + 4, cw, 26), Qt.AlignmentFlag.AlignCenter, label)
 
@@ -676,8 +690,9 @@ class ReviewOverlay(QWidget):
             return
         up = dy < 0
         strength = min(1.0, abs(dy) / SWIPE)
-        wash = QColor(SUCCESS if up else DANGER)
-        wash.setAlphaF(0.12 * strength)
+        k = self.c
+        wash = QColor(k.success if up else k.danger)
+        wash.setAlphaF(k.wash * strength)
         path = QPainterPath()
         path.addRoundedRect(r, RADIUS, RADIUS)
         p.fillPath(path, wash)
@@ -686,12 +701,12 @@ class ReviewOverlay(QWidget):
         p.setFont(f)
         tw = QFontMetricsF(f).horizontalAdvance(label) + 30
         pill = QRectF(-tw / 2, (r.top() + 18) if up else (r.bottom() - 54), tw, 34)
-        solid = QColor(SUCCESS if up else DANGER)
+        solid = QColor(k.success if up else k.danger)
         solid.setAlphaF(0.92 * strength)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(solid)
         p.drawRoundedRect(pill, 17, 17)
-        p.setPen(QColor(255, 255, 255, int(255 * strength)))
+        p.setPen(colors.alpha(k.on_accent, int(255 * strength)))
         p.drawText(pill, Qt.AlignmentFlag.AlignCenter, label)
 
     # -------------------------------------------------------------- the sheet: tasks, send, choose, answer, all caught up
@@ -700,9 +715,10 @@ class ReviewOverlay(QWidget):
         st = m.state
         mode = m.mode
         e = html.escape
-        muted = MUTED.name()
+        k = self.c
+        muted = k.muted.name()
         if mode == "choose":
-            rows = "".join(f"<p style='margin:8px 0'><b style='color:{ACCENT.name()}'>{i}</b>&nbsp;&nbsp;<b>{e(c['project'])}</b>"
+            rows = "".join(f"<p style='margin:8px 0'><b style='color:{k.accent.name()}'>{i}</b>&nbsp;&nbsp;<b>{e(c['project'])}</b>"
                            f"<br><span style='color:{muted}'>{e(c['title'])}</span></p>" for i, c in enumerate(m.choices, 1))
             return "Which session?", rows
         if mode == "confirm" and m.plan:
@@ -712,7 +728,7 @@ class ReviewOverlay(QWidget):
                             for t in pl["tasks"][:7])
             more = f"<p style='color:{muted}'>and {len(pl['tasks']) - 7} more</p>" if len(pl["tasks"]) > 7 else ""
             merges = "".join(f"<p style='margin:5px 0;color:{muted}'>• {e(x['title'])} → added to {x['into']}</p>" for x in pl["merges"])
-            where = (f"<p style='color:{muted};margin-top:0'>to <b style='color:#151821'>{e(pl['agent_label'])}</b> on "
+            where = (f"<p style='color:{muted};margin-top:0'>to <b style='color:{k.text.name()}'>{e(pl['agent_label'])}</b> on "
                      f"<span style='font-family:Consolas'>{e(pl['branch'] or '')}</span>{' (new)' if pl['branch_new'] else ''}</p>")
             wait = f"<p style='color:{muted}'>Starts when the current batch finishes.</p>" if pl["queued_behind_current"] else ""
             head = f"Send {pl['count']} task{'s' if pl['count'] != 1 else ''}" if pl["count"] else "Add repeat reports"
@@ -720,14 +736,14 @@ class ReviewOverlay(QWidget):
         if mode == "answer" and m.task:
             t = m.task
             return f"{t['code']} needs you", (f"<p style='margin-top:0'><b>{e(t['title'])}</b></p>"
-                                             f"<p style='color:{WARN.name()}'>{e(t.get('note') or '')}</p>")
+                                             f"<p style='color:{k.warn.name()}'>{e(t.get('note') or '')}</p>")
         if not st:
             return "Nothing to review", f"<p style='color:{muted}'>{e(m.message or 'Capture something with F8 or F9 first.')}</p>"
         rows = []
         for t in m.tasks[:8]:
-            col = STATE_COLOR.get(t["state"], MUTED).name()
+            col = getattr(k, STATE_COLOR.get(t["state"], "muted")).name()
             picked = mode == "tasks" and t["id"] == m.task_id
-            bg = "background-color:#eef2ff;" if picked else ""
+            bg = f"background-color:{k.selected.name()};" if picked else ""
             note = t.get("note") or ""
             if t["state"] == "ready" and not t.get("live") and (st.get("project") or {}).get("has_preview"):
                 note = "Preview isn't serving this yet. " + note
@@ -742,29 +758,30 @@ class ReviewOverlay(QWidget):
     def _paint_sheet(self, p: QPainter) -> None:
         title, body = self._sheet_html()
         mode = self.model.mode
+        k = self.c
         r = QRectF(CX - CARD_W / 2, CY - CARD_H / 2, CARD_W, CARD_H)
-        self._shadow(p, r, ACCENT if mode == "confirm" else QColor("#9aa7c7"), 0.8)
+        self._shadow(p, r, k.accent if mode == "confirm" else k.glow, 0.8)
         path = QPainterPath()
         path.addRoundedRect(r, RADIUS, RADIUS)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(CARD)
+        p.setBrush(k.card)
         p.drawPath(path)
         if mode == "confirm":  # a glow that says "this is the send step"
             g = QRadialGradient(QPointF(r.center().x(), r.top()), CARD_W * 0.9)
-            g.setColorAt(0, QColor(79, 123, 255, 64))
-            g.setColorAt(1, QColor(79, 123, 255, 0))
+            g.setColorAt(0, colors.alpha(k.accent, 64))
+            g.setColorAt(1, colors.alpha(k.accent, 0))
             p.fillPath(path, g)
-        p.setPen(QPen(QColor(255, 255, 255, 170), 1))
+        p.setPen(QPen(k.rim, 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), RADIUS, RADIUS)
         x, w = r.left() + 24, CARD_W - 48
         p.setFont(_font(22, QFont.Weight.Bold))
-        p.setPen(INK)
+        p.setPen(k.text)
         p.drawText(QPointF(x, r.top() + 46), title)
         doc = QTextDocument()
         doc.setDefaultFont(_font(13.5))
         doc.setDocumentMargin(0)
-        doc.setHtml(f"<div style='color:#151821'>{body}</div>")
+        doc.setHtml(f"<div style='color:{k.text.name()}'>{body}</div>")
         doc.setTextWidth(w)
         p.save()
         p.translate(x, r.top() + 64)
@@ -774,16 +791,16 @@ class ReviewOverlay(QWidget):
         if mode == "confirm":
             btn = QRectF(x, r.bottom() - 64, w, 44)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(ACCENT)
+            p.setBrush(k.accent)
             p.drawRoundedRect(btn, 22, 22)
             p.setFont(_font(14, QFont.Weight.Bold))
-            p.setPen(QColor("white"))
+            p.setPen(k.on_accent)
             p.drawText(btn, Qt.AlignmentFlag.AlignCenter, "Send   ↵")
         if mode == "answer":
-            p.setPen(QPen(LINE, 1))
+            p.setPen(QPen(k.line, 1))
             p.drawLine(QPointF(x, r.top() + 192), QPointF(r.right() - 24, r.top() + 192))
             p.setFont(_font(12))
-            p.setPen(MUTED)
+            p.setPen(k.muted)
             p.drawText(QPointF(x, r.bottom() - 20), "Ctrl+Enter saves, then S sends it back")
 
     # -------------------------------------------------------------- header and footer pills
@@ -791,6 +808,7 @@ class ReviewOverlay(QWidget):
 
     def _paint_header(self, p: QPainter) -> None:
         m = self.model
+        k = self.c
         st = m.state
         sess = st.get("session") or {}
         r = QRectF(24, 14, W - 48, HEAD_H)
@@ -798,23 +816,23 @@ class ReviewOverlay(QWidget):
         if m.mode != "rename":
             f = _font(14, QFont.Weight.Bold)
             p.setFont(f)
-            p.setPen(INK)
+            p.setPen(k.text)
             name = ("🔒 " if sess.get("name_locked") else "") + (sess.get("title") or "Review")
             p.drawText(QPointF(r.left() + 20, r.top() + 23), QFontMetricsF(f).elidedText(name, Qt.TextElideMode.ElideRight, r.width() - 180))
         parts = []
         counts = st.get("counts", {})
         for key, label in (("working", "working"), ("checking", "checking"), ("ready", "ready"), ("needs_you", "need you")):
             if counts.get(key):
-                parts.append((f"{counts[key]} {label}", STATE_COLOR[key]))
+                parts.append((f"{counts[key]} {label}", getattr(k, STATE_COLOR[key])))
         if st.get("incoming"):
-            parts.append((f"{st['incoming']} on the way", FAINT))
+            parts.append((f"{st['incoming']} on the way", k.muted if k.dark else k.faint))
         runs = [x for x in st.get("runs", []) if x["state"] in ("starting", "running", "checking")]
         if runs and runs[0].get("stage"):
-            parts.append((runs[0]["stage"][:40], ACCENT))
+            parts.append((runs[0]["stage"][:40], k.accent))
         if st.get("ready_to_refresh"):
-            parts.insert(0, ("Ready to refresh", SUCCESS))
+            parts.insert(0, ("Ready to refresh", k.success))
         if not parts:
-            parts = [(f"{len(m.cards)} to review" if m.cards else "Nothing waiting", MUTED)]
+            parts = [(f"{len(m.cards)} to review" if m.cards else "Nothing waiting", k.muted)]
         f = _font(11.5)
         p.setFont(f)
         fm = QFontMetricsF(f)
@@ -830,10 +848,10 @@ class ReviewOverlay(QWidget):
         b = self._badge_rect()
         pulse = self.anim_kind == "out_up" and float(self.anim.currentValue() or 0) > 0.55
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(ACCENT if n else QColor(20, 24, 33, 14))
+        p.setBrush(k.accent if n else k.soft)
         p.drawRoundedRect(b.adjusted(-3, -3, 3, 3) if pulse else b, 15, 15)
         p.setFont(_font(12.5, QFont.Weight.Bold))
-        p.setPen(QColor("white") if n else MUTED)
+        p.setPen(k.on_accent if n else k.muted)
         p.drawText(b, Qt.AlignmentFlag.AlignCenter, f"Send {n} approved" if n else "0 approved")
 
     def _paint_footer(self, p: QPainter) -> None:

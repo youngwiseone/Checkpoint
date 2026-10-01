@@ -18,7 +18,7 @@ import webbrowser
 from typing import Optional
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -28,6 +28,7 @@ from ..config import DEFAULT_PORT
 from ..core import get_core
 from ..events import hooks, notices
 from ..settings_store import get_settings
+from . import colors
 from .overlay import ReviewOverlay
 from .switcher import ProjectSwitcher
 from .windows import NoteWindow, Toast
@@ -37,19 +38,21 @@ INSTANCE_KEY = f"Checkpoint-{getpass.getuser()}"
 
 
 def _icon(color: str, ring: Optional[str] = None) -> QIcon:
+    """A tray icon in the theme's colours (as it was at startup): a dot of `color` (a palette key) on a rounded tile."""
+    c = colors.current()
     pm = QPixmap(64, 64)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setBrush(QColor("#1d2027"))
-    p.setPen(QColor("#5b8cff"))
+    p.setBrush(c.surface_2)
+    p.setPen(c.accent)
     p.drawRoundedRect(4, 4, 56, 56, 14, 14)
-    p.setBrush(QColor(color))
+    p.setBrush(getattr(c, color))
     p.setPen(Qt.PenStyle.NoPen)
     p.drawEllipse(20, 20, 24, 24)
     if ring:
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QColor(ring))
+        p.setPen(getattr(c, ring))
         p.drawEllipse(14, 14, 36, 36)
     p.end()
     return QIcon(pm)
@@ -294,11 +297,11 @@ class DesktopHost:
     # ------------------------------------------------------------ tray
     def _build_tray(self) -> None:
         self.icons = {
-            "idle": _icon("#6b7280"),
-            "recording": _icon("#f07171"),
-            "session": _icon("#5b8cff"),
-            "paused": _icon("#e0a84e"),
-            "problem": _icon("#f07171", ring="#e0a84e"),
+            "idle": _icon("muted"),
+            "recording": _icon("danger"),
+            "session": _icon("accent"),
+            "paused": _icon("warn"),
+            "problem": _icon("danger", ring="warn"),
         }
         self.tray = QSystemTrayIcon(self.icons["idle"])
         menu = QMenu()

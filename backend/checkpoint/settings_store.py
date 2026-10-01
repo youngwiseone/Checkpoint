@@ -101,6 +101,11 @@ class SharingSettings(BaseModel):
     allow_insecure_private_network: bool = False
 
 
+class AppearanceSettings(BaseModel):
+    # dark: night blue everywhere (default). light: the airy card look. See theme.py.
+    theme: Literal["dark", "light"] = "dark"
+
+
 class AppSettings(BaseModel):
     first_run_complete: bool = False
     hotkeys: HotkeySettings = Field(default_factory=HotkeySettings)
@@ -112,6 +117,7 @@ class AppSettings(BaseModel):
     app_watch: AppWatchSettings = Field(default_factory=AppWatchSettings)
     sharing: SharingSettings = Field(default_factory=SharingSettings)
     agents: AgentSettings = Field(default_factory=AgentSettings)
+    appearance: AppearanceSettings = Field(default_factory=AppearanceSettings)
     last_project_id: Optional[str] = None
     version: int = SETTINGS_VERSION
 

@@ -22,7 +22,9 @@ from PySide6.QtWidgets import QButtonGroup, QGridLayout, QHBoxLayout, QLabel, QL
 
 from ..capture import win32
 from ..services.switcher_model import SwitcherModel
-from .overlay import ACCENT, CARD, DANGER, FAINT, INK, LINE, MUTED, RADIUS, SUCCESS, _font, paint_keys, paint_message, paint_pill, paint_shadow
+from . import colors
+from .colors import Colors, css
+from .overlay import RADIUS, _font, paint_keys, paint_message, paint_pill, paint_shadow
 from .windows import logical_point_for_physical
 
 CARD_W, CARD_H = 380, 520
@@ -35,25 +37,38 @@ ROWS_TOP = TOP + 78
 ROW_H = 56
 VISIBLE = (CARD_H - (ROWS_TOP - TOP) - 12) // ROW_H
 
-FORM_CSS = """
-QWidget#form { background: transparent; }
-QLabel { color: #6b7280; font-family: 'Segoe UI'; font-size: 11px; font-weight: 600; }
-QLabel#status { font-weight: 400; }
-QLineEdit { background: white; color: #151821; border: 1px solid rgba(20,24,33,0.13); border-radius: 9px; padding: 4px 9px;
-            font-family: 'Segoe UI'; font-size: 13px; selection-background-color: #4f7bff; selection-color: white; }
-QLineEdit:focus { border: 1px solid #4f7bff; }
-QPushButton { background: rgba(20,24,33,0.06); color: #151821; border: 1px solid transparent; border-radius: 13px;
-              padding: 4px 11px; font-family: 'Segoe UI'; font-size: 12px; font-weight: 600; }
-QPushButton:hover { background: rgba(20,24,33,0.10); }
-QPushButton:checked { background: #4f7bff; color: white; }
-QPushButton:focus { border: 1px solid #4f7bff; }
+
+
+def form_css(c: Colors) -> str:
+    """The new project form, in the current theme's colours."""
+    sel = f"selection-background-color: {css(c.accent)}; selection-color: {css(c.on_accent)};"
+    return f"""
+QWidget#form {{ background: transparent; }}
+QLabel {{ color: {css(c.muted)}; font-family: 'Segoe UI'; font-size: 11px; font-weight: 600; }}
+QLabel#status {{ font-weight: 400; }}
+QLineEdit {{ background: {css(c.field)}; color: {css(c.text)}; border: 1px solid {css(colors.alpha(c.line, 34))}; border-radius: 9px;
+            padding: 4px 9px; font-family: 'Segoe UI'; font-size: 13px; {sel} }}
+QLineEdit:focus {{ border: 1px solid {css(c.accent)}; }}
+QPushButton {{ background: {css(c.soft)}; color: {css(c.text)}; border: 1px solid transparent;
+              border-radius: 13px; padding: 4px 11px; font-family: 'Segoe UI'; font-size: 12px; font-weight: 600; }}
+QPushButton:hover {{ background: {css(colors.alpha(c.soft, c.soft.alpha() * 2))}; }}
+QPushButton:checked {{ background: {css(c.accent)}; color: {css(c.on_accent)}; }}
+QPushButton:disabled {{ color: {css(c.faint)}; }}
+QPushButton:focus {{ border: 1px solid {css(c.accent)}; }}
 """
-GO_CSS = ("QPushButton { background: #4f7bff; color: white; border: none; border-radius: 22px; font-family: 'Segoe UI';"
-          " font-size: 14px; font-weight: 700; } QPushButton:hover { background: #3f6bf0; }"
-          " QPushButton:focus { border: 2px solid #c9d6ff; }")
-SEARCH_CSS = ("QLineEdit { background: rgba(20,24,33,0.05); color: #151821; border: 1px solid transparent; border-radius: 14px;"
-              " padding: 8px 14px; font-family: 'Segoe UI'; font-size: 16px; selection-background-color: #4f7bff;"
-              " selection-color: white; } QLineEdit:focus { border: 1px solid rgba(79,123,255,0.45); }")
+
+
+def go_css(c: Colors) -> str:
+    return (f"QPushButton {{ background: {css(c.accent)}; color: {css(c.on_accent)}; border: none; border-radius: 22px;"
+            f" font-family: 'Segoe UI'; font-size: 14px; font-weight: 700; }} QPushButton:hover {{ background: {css(c.accent_strong)}; }}"
+            f" QPushButton:focus {{ border: 2px solid {css(c.focus)}; }}")
+
+
+def search_css(c: Colors) -> str:
+    return (f"QLineEdit {{ background: {css(c.softer)}; color: {css(c.text)}; border: 1px solid transparent; border-radius: 14px;"
+            f" padding: 8px 14px; font-family: 'Segoe UI'; font-size: 16px; selection-background-color: {css(c.accent)};"
+            f" selection-color: {css(c.on_accent)}; }} QLineEdit:focus {{ border: 1px solid {css(colors.alpha(c.accent, 115))}; }}")
+
 
 TEXT_FIELDS = (("name", "Name", "What you're testing"), ("repo_path", "Repo folder", "C:\\path\\to\\repo (optional)"),
                ("base_branch", "Base branch", "main"), ("program", "Program", "Game.exe or window title"),
@@ -61,8 +76,8 @@ TEXT_FIELDS = (("name", "Name", "What you're testing"), ("repo_path", "Repo fold
                ("preview_command", "Preview", "e.g. npm run dev"), ("preview_url", "Preview URL", "http://localhost:5173"))
 
 
-def _avatar_color(name: str) -> QColor:
-    return QColor.fromHsv(zlib.crc32(name.lower().encode()) % 360, 120, 215)
+def _avatar_color(name: str, dark: bool = False) -> QColor:
+    return QColor.fromHsv(zlib.crc32(name.lower().encode()) % 360, 120, 190 if dark else 215)
 
 
 class _Keys(QObject):
@@ -99,13 +114,11 @@ class ProjectSwitcher(QWidget):
         self.search = QLineEdit(self)
         self.search.setAccessibleName("Search projects, or type a new project's name")
         self.search.setPlaceholderText("Switch to… or name a new project")
-        self.search.setStyleSheet(SEARCH_CSS)
         self.search.setGeometry(LEFT + 18, TOP + 18, CARD_W - 36, 44)
         self.search.textChanged.connect(self._searched)
         self.search.installEventFilter(self.keys)
 
         self.form = QWidget(self, objectName="form")
-        self.form.setStyleSheet(FORM_CSS)
         self.form.setGeometry(LEFT + 20, TOP + 80, CARD_W - 40, CARD_H - 80 - 74)
         grid = QGridLayout(self.form)
         grid.setContentsMargins(0, 0, 0, 0)
@@ -163,7 +176,6 @@ class ProjectSwitcher(QWidget):
                  self.mic, self.loopback, b["setup_command"], b["check_command"], b["preview_command"], b["preview_url"]]
 
         self.go = QPushButton("Create and start session   ↵", self)
-        self.go.setStyleSheet(GO_CSS)
         self.go.setGeometry(LEFT + 22, TOP + CARD_H - 62, CARD_W - 44, 44)
         self.go.clicked.connect(self._create)
         self.go.installEventFilter(self.keys)
@@ -172,8 +184,21 @@ class ProjectSwitcher(QWidget):
 
         self.msg_timer = QTimer(self, singleShot=True, timeout=self._clear_message)
         self._last_msg = ""
+        self.c: Colors = colors.current()
+        self._theme = ""
+        self._apply_theme()
 
     # -------------------------------------------------------------- building blocks
+    def _apply_theme(self) -> None:
+        """Pick up the current theme: the painted card reads self.c, the widgets on it need new stylesheets."""
+        self.c = c = colors.current()
+        if c.name == self._theme:
+            return
+        self._theme = c.name
+        self.search.setStyleSheet(search_css(c))
+        self.form.setStyleSheet(form_css(c))
+        self.go.setStyleSheet(go_css(c))
+
     def _choices(self, options: list[tuple[str, str]], key: str) -> QButtonGroup:
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -347,6 +372,7 @@ class ProjectSwitcher(QWidget):
 
     # -------------------------------------------------------------- render: the widgets on the card
     def render(self) -> None:
+        self._apply_theme()
         m = self.model
         listing = m.mode == "list"
         self.search.setVisible(listing)
@@ -366,7 +392,8 @@ class ProjectSwitcher(QWidget):
             st = m.repo_status
             self.boxes["base_branch"].setPlaceholderText(st.get("branch") or "main")
             self.status.setText(st.get("text", ""))
-            col = SUCCESS if st.get("ok") else (DANGER if st.get("ok") is False else MUTED)
+            c = self.c
+            col = c.success if st.get("ok") else (c.danger if st.get("ok") is False else c.muted)
             self.status.setStyleSheet(f"color: {col.name()};")
             for group, key in ((self.agent, "default_agent"), (self.access, "agent_access")):
                 for btn in group.buttons():
@@ -404,20 +431,21 @@ class ProjectSwitcher(QWidget):
         p = QPainter(self)
         p.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing)
         m = self.model
+        c = self.c
         self._paint_header(p)
         r = QRectF(LEFT, TOP, CARD_W, CARD_H)
-        paint_shadow(p, r, QColor("#9aa7c7") if m.mode == "list" else ACCENT, 0.8)
+        paint_shadow(p, r, c.glow if m.mode == "list" else c.accent, 0.8)
         path = QPainterPath()
         path.addRoundedRect(r, RADIUS, RADIUS)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(CARD)
+        p.setBrush(c.card)
         p.drawPath(path)
         if m.mode == "new":  # the same "about to do something" glow as the send step
             g = QRadialGradient(QPointF(r.center().x(), r.top()), CARD_W * 0.9)
-            g.setColorAt(0, QColor(79, 123, 255, 56))
-            g.setColorAt(1, QColor(79, 123, 255, 0))
+            g.setColorAt(0, colors.alpha(c.accent, 56))
+            g.setColorAt(1, colors.alpha(c.accent, 0))
             p.fillPath(path, g)
-        p.setPen(QPen(QColor(255, 255, 255, 170), 1))
+        p.setPen(QPen(c.rim, 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), RADIUS, RADIUS)
         if m.mode == "list":
@@ -433,33 +461,35 @@ class ProjectSwitcher(QWidget):
 
     def _paint_header(self, p: QPainter) -> None:
         m = self.model
+        c = self.c
         r = QRectF(24, 14, W - 48, HEAD_H)
         paint_pill(p, r)
         p.setFont(_font(14, QFont.Weight.Bold))
-        p.setPen(INK)
+        p.setPen(c.text)
         p.drawText(QPointF(r.left() + 20, r.top() + 23), "Switch project")
         f = _font(11.5)
         p.setFont(f)
         if m.running_name:
-            p.setPen(SUCCESS)
+            p.setPen(c.success)
             text = f"●  Recording in {m.running_name}"
         else:
-            p.setPen(MUTED)
+            p.setPen(c.muted)
             text = "No session running"
         p.drawText(QPointF(r.left() + 20, r.top() + 42), QFontMetricsF(f).elidedText(text, Qt.TextElideMode.ElideRight, r.width() - 180))
         b = self._badge_rect()
         new = m.mode == "new"
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(20, 24, 33, 14) if new else ACCENT)
+        p.setBrush(c.soft if new else c.accent)
         p.drawRoundedRect(b, 15, 15)
         p.setFont(_font(12.5, QFont.Weight.Bold))
-        p.setPen(INK if new else QColor("white"))
+        p.setPen(c.text if new else c.on_accent)
         p.drawText(b, Qt.AlignmentFlag.AlignCenter, "‹  Projects" if new else "+  New project")
 
     def _paint_list(self, p: QPainter, card: QRectF) -> None:
         m = self.model
+        c = self.c
         rows = m.filtered
-        p.setPen(QPen(LINE, 1))
+        p.setPen(QPen(c.line, 1))
         p.drawLine(QPointF(card.left() + 18, ROWS_TOP - 8), QPointF(card.right() - 18, ROWS_TOP - 8))
         end = min(m.count, self.scroll + VISIBLE)
         for i in range(self.scroll, end):
@@ -468,7 +498,7 @@ class ProjectSwitcher(QWidget):
             picked = i == m.index
             if picked:
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor("#eef2ff"))
+                p.setBrush(c.selected)
                 p.drawRoundedRect(rr, 14, 14)
             if i < len(rows):
                 self._paint_row(p, rr, rows[i], picked)
@@ -476,7 +506,7 @@ class ProjectSwitcher(QWidget):
                 self._paint_new_row(p, rr, picked)
         if m.count > end:  # more below
             p.setFont(_font(11.5))
-            p.setPen(FAINT)
+            p.setPen(c.muted if c.dark else c.faint)
             p.drawText(QRectF(card.left(), card.bottom() - 18, CARD_W, 14), Qt.AlignmentFlag.AlignCenter, f"{m.count - end} more ↓")
 
     @staticmethod
@@ -486,7 +516,7 @@ class ProjectSwitcher(QWidget):
         p.setBrush(color)
         p.drawRoundedRect(a, 11, 11)
         p.setFont(_font(16, QFont.Weight.Bold))
-        p.setPen(QColor("white"))
+        p.setPen(colors.current().on_accent)
         p.drawText(a, Qt.AlignmentFlag.AlignCenter, letter)
 
     @staticmethod
@@ -495,7 +525,7 @@ class ProjectSwitcher(QWidget):
         w = QFontMetricsF(f).horizontalAdvance(text) + 18
         r = QRectF(right - w, cy - 11, w, 22)
         bg = QColor(color)
-        bg.setAlpha(30)
+        bg.setAlpha(40 if colors.current().dark else 30)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(bg)
         p.drawRoundedRect(r, 11, 11)
@@ -505,21 +535,22 @@ class ProjectSwitcher(QWidget):
         return w
 
     def _paint_row(self, p: QPainter, rr: QRectF, row: dict, picked: bool) -> None:
-        self._avatar(p, rr, _avatar_color(row["name"]), (row["name"].strip()[:1] or "?").upper())
+        c = self.c
+        self._avatar(p, rr, _avatar_color(row["name"], c.dark), (row["name"].strip()[:1] or "?").upper())
         right = rr.right() - 12
         if row["running"]:
-            right -= self._badge(p, right, rr.center().y(), "Recording", SUCCESS) + 8
+            right -= self._badge(p, right, rr.center().y(), "Recording", c.success) + 8
         elif row["detected"]:
-            right -= self._badge(p, right, rr.center().y(), "Open now", ACCENT) + 8
+            right -= self._badge(p, right, rr.center().y(), "Open now", c.accent_strong if c.dark else c.accent) + 8
         elif picked:
             p.setFont(_font(12, QFont.Weight.DemiBold))
-            p.setPen(ACCENT)
+            p.setPen(c.accent_strong if c.dark else c.accent)
             p.drawText(QRectF(right - 60, rr.top(), 60, rr.height()), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, "Start  ↵")
             right -= 68
         x = rr.left() + 58
         f = _font(15, QFont.Weight.DemiBold)
         p.setFont(f)
-        p.setPen(INK)
+        p.setPen(c.text)
         p.drawText(QPointF(x, rr.top() + 22), QFontMetricsF(f).elidedText(row["name"], Qt.TextElideMode.ElideRight, right - x))
         parts = [row["ago"]]
         if row["pending"]:
@@ -530,37 +561,39 @@ class ProjectSwitcher(QWidget):
             parts.append(row["repo"])
         f = _font(12)
         p.setFont(f)
-        p.setPen(MUTED)
+        p.setPen(c.muted)
         p.drawText(QPointF(x, rr.top() + 40), QFontMetricsF(f).elidedText("  ·  ".join(parts), Qt.TextElideMode.ElideRight, right - x))
 
     def _paint_new_row(self, p: QPainter, rr: QRectF, picked: bool) -> None:
         m = self.model
-        self._avatar(p, rr, ACCENT if picked else QColor("#b8c6f5"), "+")
+        c = self.c
+        self._avatar(p, rr, c.accent if picked else c.idle, "+")
         x = rr.left() + 58
         q = m.query.strip()
         title = f"New project “{q}”" if q and not m.exact else "New project"
         f = _font(15, QFont.Weight.DemiBold)
         p.setFont(f)
-        p.setPen(ACCENT if picked else INK)
+        p.setPen((c.accent_strong if c.dark else c.accent) if picked else c.text)
         p.drawText(QPointF(x, rr.top() + 22), QFontMetricsF(f).elidedText(title, Qt.TextElideMode.ElideRight, rr.right() - x - 12))
         t = m._template()
         sub = f"Same settings as {t['name']}, change anything" if t else "Set it up and start a session"
         f = _font(12)
         p.setFont(f)
-        p.setPen(MUTED)
+        p.setPen(c.muted)
         p.drawText(QPointF(x, rr.top() + 40), QFontMetricsF(f).elidedText(sub, Qt.TextElideMode.ElideRight, rr.right() - x - 12))
 
     def _paint_new_head(self, p: QPainter, card: QRectF) -> None:
         m = self.model
+        c = self.c
         x = card.left() + 22
         p.setFont(_font(22, QFont.Weight.Bold))
-        p.setPen(INK)
+        p.setPen(c.text)
         p.drawText(QPointF(x, card.top() + 44), "New project")
         t = m.template
-        sub = f"Settings copied from {t['name']} — change anything" if t else "Set it up, then start a session"
+        sub = f"Settings copied from {t['name']}. Change anything." if t else "Set it up, then start a session"
         f = _font(12.5)
         p.setFont(f)
-        p.setPen(MUTED)
+        p.setPen(c.muted)
         p.drawText(QPointF(x, card.top() + 64), QFontMetricsF(f).elidedText(sub, Qt.TextElideMode.ElideRight, CARD_W - 44))
 
     def _keys(self) -> list[tuple[str, str]]:
