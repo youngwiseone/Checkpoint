@@ -56,17 +56,28 @@ def provisional_title(text: str) -> str:
     return first if len(first) <= 120 else first[:117].rstrip() + "…"
 
 
-def default_project_id() -> str:
-    """Captures outside a session go to the project whose program is in the foreground, else the last
-    used project, else a created 'General' project."""
-    pid = None
+_LOOK_NOW = object()
+
+
+def foreground_project(window=_LOOK_NOW) -> Optional[str]:  # noqa: ANN001
+    """The project whose program is in the foreground. Pass the window seen when the shortcut was pressed:
+    by the time a note is saved, Checkpoint's own popup has the focus."""
     try:
-        from ..capture.win32 import foreground_window
         from .flow import project_for_window
 
-        pid = project_for_window(foreground_window())
+        if window is _LOOK_NOW:
+            from ..capture.win32 import foreground_window
+
+            window = foreground_window()
+        return project_for_window(window)
     except Exception:  # noqa: BLE001 - inference is a convenience, never a reason to lose a capture
-        pid = None
+        return None
+
+
+def default_project_id(window=_LOOK_NOW) -> str:  # noqa: ANN001
+    """Captures outside a session go to the project whose program is in the foreground, else the last
+    used project, else a created 'General' project."""
+    pid = foreground_project(window)
     pid = pid or get_settings().last_project_id
     with write_session() as s:
         if pid and s.get(Project, pid) is not None:
@@ -242,14 +253,15 @@ class CaptureService:
         return result
 
     def quick_note(self, text: str, category: Optional[str] = None, *, mono: Optional[float] = None,
-                   taken_at: Optional[datetime] = None) -> dict:
+                   taken_at: Optional[datetime] = None, window=_LOOK_NOW) -> dict:  # noqa: ANN001
+        """`window`: the foreground window when the note was started (F9), used to pick the project."""
         text = (text or "").strip()
         if not text:
             raise ValueError("Write a short note before saving.")
         if category and category not in CATEGORIES:
             raise ValueError("Unknown category")
         active = self.sessions.active
-        project_id = active.project_id if active else default_project_id()
+        project_id = active.project_id if active else default_project_id(window)
         taken_at = taken_at or datetime.now(timezone.utc)
         offset = active.clock.offset_ms(mono) if active else None
         with write_session() as s:

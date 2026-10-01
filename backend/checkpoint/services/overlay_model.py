@@ -66,6 +66,7 @@ class OverlayModel:
         t = flow.target(active_session_id, window)
         if t.get("choices"):
             if self.session_id and any(c["session_id"] == self.session_id for c in t["choices"]):
+                flow.adopt_loose(self.session_id)
                 self.refresh()
                 return
             self.choices, self.mode = t["choices"], "choose"
@@ -78,6 +79,7 @@ class OverlayModel:
         if sid != self.session_id:
             self.select(sid)
         else:
+            flow.adopt_loose(sid)  # cards captured outside a session since it was last open
             self.refresh()
 
     def select(self, session_id: str) -> None:

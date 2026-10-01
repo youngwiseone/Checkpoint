@@ -158,9 +158,12 @@ class DesktopHost:
             from ..capture import win32
 
             fg = win32.foreground_info()
+            own = fg is not None and fg.pid == win32.current_pid()
             self.bridge.note_requested.emit({
                 "id": None, "mono": mono, "fg_hwnd": fg.hwnd if fg else 0,
                 "work_rect": fg.work_rect.as_mss() if fg and fg.work_rect else None,
+                # The project is decided by what was in front when F9 was pressed, not when the note is saved.
+                "window": None if own else win32.foreground_window(),
             })
 
     # ------------------------------------------------------------ review overlay
@@ -267,7 +270,7 @@ class DesktopHost:
                 self.core.capture.save_capture_note(payload["id"], text, category)
                 self.toast.show_message("success", "Saved as a card" + self._waiting_hint(), payload.get("work_rect"))
             else:
-                self.core.capture.quick_note(text, category, mono=payload.get("mono"))
+                self.core.capture.quick_note(text, category, mono=payload.get("mono"), window=payload.get("window"))
                 self.toast.show_message("success", "Note saved as a card" + self._waiting_hint(), payload.get("work_rect"))
         except ValueError as e:
             return str(e)
