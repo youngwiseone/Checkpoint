@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -44,7 +45,8 @@ log = logging.getLogger(__name__)
 
 AGENT_LABELS = {"claude": "Claude Code", "codex": "Codex"}
 IN_FLIGHT = ("sending", "sent", "working", "checking")
-FINISHED = ("ready", "needs_you")
+FINISHED = ("ready", "needs_you", "done")
+PREP_PREFIX = "checkpoint/prep-"
 MCP_NAME = "checkpoint_run"
 
 
@@ -216,8 +218,9 @@ def send(session_id: str) -> dict:
         s.add(run)
         s.flush()
         for w in to_send:
-            n += 1
-            w.task_number = n
+            if w.task_number is None:  # a task sent again keeps its T-number
+                n += 1
+                w.task_number = n
             w.agent_state = "sending"
             w.agent_run_id = run.id
             w.agent_note = None
@@ -242,6 +245,81 @@ def resend(item_id: str) -> dict:
         w.agent_run_id = None
         w.duplicate_of_id = None
         return {"ok": True, "session_id": w.session_id}
+
+
+def mark_works(item_id: str) -> None:
+    """You tried it and it works: the task is done."""
+    with write_session() as s:
+        w = s.get(WorkItem, item_id)
+        if w is None:
+            raise SendError("Task not found")
+        if w.agent_state not in ("ready", "needs_you"):
+            raise SendError("Only finished tasks can be marked as working.")
+        w.agent_state = "done"
+        w.work_status = "done"
+        w.completed_at = utcnow()
+    hooks.emit_state()
+
+
+def still_broken(item_id: str) -> str:
+    """You tried it and it isn't fixed: a new card for the follow-up (matched to the task by its title)."""
+    from ..models import DraftItem
+
+    with write_session() as s:
+        w = s.get(WorkItem, item_id)
+        if w is None:
+            raise SendError("Task not found")
+        if w.agent_state == "done":
+            w.agent_state = "ready"
+            w.work_status = "in_progress"
+            w.completed_at = None
+        d = DraftItem(project_id=w.project_id, session_id=w.session_id, origin="manual", type=w.type,
+                      title=f"Still broken: {w.title}"[:300], description="")
+        s.add(d)
+        s.flush()
+        did = d.id
+    hooks.emit_state()
+    return did
+
+
+def answer(item_id: str, text: str) -> None:
+    """Answer the agent's question. The task goes back to approved with the answer, ready to send again."""
+    text = (text or "").strip()
+    if not text:
+        raise SendError("Write an answer first.")
+    with write_session() as s:
+        w = s.get(WorkItem, item_id)
+        if w is None:
+            raise SendError("Task not found")
+        if w.agent_state != "needs_you":
+            raise SendError("Only tasks that need you can be answered.")
+        question = (w.agent_note or "").strip()
+        asked = f"\n\nThe agent asked: {question}" if question else "\n"
+        w.description = (w.description or "").rstrip() + asked + f"\nThe user's answer: {text}"
+        w.agent_state = None
+        w.agent_run_id = None
+        w.duplicate_of_id = None
+        w.agent_note = f"Answered: {text[:300]}"
+    hooks.emit_state()
+
+
+def restart_preview(session_id: str, previews: PreviewManager):  # noqa: ANN201
+    """(Re)start the project's preview from the session's working copy. Blocks until it serves or fails."""
+    with read_session() as s:
+        sess = s.get(Session, session_id)
+        if sess is None:
+            raise SendError("Session not found")
+        proj = s.get(Project, sess.project_id)
+        wt, cmd, url, pid, name = sess.worktree_path, proj.preview_command, proj.preview_url, proj.id, proj.name
+    if not wt:
+        raise SendError("This session has no working copy yet. It's made when you first approve a task.")
+    if not cmd.strip():
+        raise SendError(f"Set a preview command for “{name}” first (Settings → Projects).")
+    pv = previews.start(session_id, pid, wt, cmd, url)
+    hooks.emit_state()
+    if pv.state != "running":
+        raise SendError(pv.error or "The preview didn't start")
+    return pv
 
 
 def dismiss_duplicate(item_id: str) -> None:
@@ -500,6 +578,7 @@ class AgentWorker(Worker):
         self._threads: dict[str, threading.Thread] = {}
         self._procs: dict[str, subprocess.Popen] = {}
         self._cancel: set[str] = set()
+        self._prep_tried: dict[str, float] = {}
         _worker = self
 
     def step(self) -> bool:
@@ -510,7 +589,7 @@ class AgentWorker(Worker):
             busy |= {sid for sid in self._threads}
             queued = s.scalars(select(AgentRun).where(AgentRun.state == "queued").order_by(AgentRun.created_at)).all()
             starting = [(r.id, r.session_id) for r in queued]
-        started = False
+        started = self._prepare_some(busy)
         for rid, sid in starting:
             if sid in busy:
                 _set_run(rid, stage="Waiting for this session's current batch to finish")
@@ -521,6 +600,32 @@ class AgentWorker(Worker):
             t.start()
             started = True
         return started
+
+    def _prepare_some(self, busy: set[str]) -> bool:
+        """Make a session's working copy as soon as it has an approved task, so a send starts straight away."""
+        now = time.monotonic()
+        with read_session() as s:
+            rows = s.execute(
+                select(Session.id).join(Project, Project.id == Session.project_id).join(WorkItem, WorkItem.session_id == Session.id)
+                .where(Session.worktree_path.is_(None), Session.is_demo.is_(False), Project.repo_path.is_not(None),
+                       Project.default_agent.in_(tuple(AGENT_LABELS)), WorkItem.agent_state.is_(None),
+                       WorkItem.duplicate_of_id.is_(None), WorkItem.work_status.in_(("open", "in_progress")))
+                .distinct().limit(5)).all()
+        for (sid,) in rows:
+            if sid in busy or sid in self._threads or now - self._prep_tried.get(sid, -1e9) < 600:
+                continue
+            self._prep_tried[sid] = now
+            t = threading.Thread(target=self._prepare_safe, args=(sid,), daemon=True, name=f"prep-{sid[:6]}")
+            self._threads[sid] = t
+            t.start()
+            return True
+        return False
+
+    def _prepare_safe(self, session_id: str) -> None:
+        try:
+            prepare(session_id)
+        except Exception as e:  # noqa: BLE001 - the send tries again and reports the problem on its tasks
+            log.warning("Preparing the working copy for %s failed: %s", session_id, e)
 
     def _promote_suggestions(self) -> None:
         a = self.sessions.active if self.sessions else None
@@ -624,9 +729,24 @@ class AgentWorker(Worker):
         self._check_and_preview(run_id, info, wt)
 
     def _ensure_worktree(self, run_id: str, info: dict) -> str:
+        with _prep_lock(info["session_id"]):  # a prepared working copy may still be setting up
+            with read_session() as s:
+                info["wt"] = s.get(Session, info["session_id"]).worktree_path
+            return self._ensure_worktree_locked(run_id, info)
+
+    def _ensure_worktree_locked(self, run_id: str, info: dict) -> str:
         wt = info["wt"]
-        if wt and Path(wt).is_dir() and ws.current_branch(wt) == info["branch"]:
-            return wt
+        if wt and Path(wt).is_dir():
+            cur = ws.current_branch(wt)
+            if cur == info["branch"]:
+                return wt
+            if cur.startswith(PREP_PREFIX):
+                # Prepared in the background before the name was final: rename it, and catch up with the base
+                # branch if that moved on while you were reviewing (nothing has been committed here yet).
+                ws.git(["branch", "-m", cur, info["branch"]], wt)
+                base = info["base"] or ws.inspect_repo(info["repo"]).default_branch
+                ws.git(["merge", "--ff-only", base], wt, check=False, timeout=300)
+                return wt
         repo = ws.inspect_repo(info["repo"]).root
         dest = Path(wt) if wt else ws.worktree_dir(info["project_name"], info["branch"])
         if ws.branch_exists(repo, info["branch"]) and ws.git(["rev-parse", "--verify", "--quiet", f"refs/heads/{info['branch']}"], repo, check=False):
@@ -666,12 +786,17 @@ class AgentWorker(Worker):
                 proc.stdin.close()
             except OSError:
                 pass
+            last_activity = 0.0
             for line in proc.stdout:
                 logf.write(line)
                 logf.flush()
                 ev = _parse(line)
                 if ev is None:
                     continue
+                act = activity(ev)
+                if act and accepted and time.monotonic() - last_activity > 1.0:
+                    last_activity = time.monotonic()
+                    _set_run(run_id, stage=act)
                 if not accepted:
                     accepted = True
                     with write_session() as s:
@@ -751,6 +876,79 @@ class AgentWorker(Worker):
         hooks.emit_toast("success", f"{n} task{'s' if n != 1 else ''} ready to refresh · {info['title']}")
 
 
+_prep_locks: dict[str, threading.Lock] = {}
+_prep_guard = threading.Lock()
+
+
+def _prep_lock(session_id: str) -> threading.Lock:
+    with _prep_guard:
+        return _prep_locks.setdefault(session_id, threading.Lock())
+
+
+def prepare(session_id: str) -> Optional[str]:
+    """Create the session's working copy on a temporary branch and run the setup command.
+    The branch is renamed to the session's name on the first send."""
+    with _prep_lock(session_id):
+        with read_session() as s:
+            sess = s.get(Session, session_id)
+            proj = s.get(Project, sess.project_id) if sess else None
+            if sess is None or sess.worktree_path or not proj.repo_path:
+                return None
+            info = {"repo": proj.repo_path, "base": proj.base_branch, "setup": proj.setup_command, "name": proj.name}
+        repo = ws.inspect_repo(info["repo"])
+        branch = PREP_PREFIX + session_id[:8]
+        dest = ws.worktree_dir(info["name"], branch)
+        if ws.git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], repo.root, check=False):
+            ws.attach_worktree(repo.root, branch, dest)
+            base_commit = ws.head(str(dest))
+        else:
+            base_commit = ws.create_worktree(repo.root, branch, info["base"] or repo.default_branch, dest)
+        if info["setup"].strip():
+            res = run_command(info["setup"], str(dest), SETUP_TIMEOUT_S, paths().logs / "agents" / f"prep-{session_id[:8]}.setup.log")
+            if not res.ok:
+                ws.remove_worktree(repo.root, str(dest))
+                ws.git(["branch", "-D", branch], repo.root, check=False)
+                raise RuntimeError(f"The setup command failed:\n{res.tail(10)}")
+        with write_session() as s:
+            sess = s.get(Session, session_id)
+            sess.worktree_path = str(dest)
+            sess.base_commit = base_commit
+        hooks.emit_state()
+        return str(dest)
+
+
+ACTIVITY_VERBS = {"Edit": "Editing", "MultiEdit": "Editing", "Write": "Writing", "Read": "Reading", "NotebookEdit": "Editing"}
+
+
+def activity(ev: dict) -> Optional[str]:
+    """A short line saying what the agent is doing, from one stream event (Claude Code or Codex)."""
+    if ev.get("type") == "assistant":
+        for block in reversed((ev.get("message") or {}).get("content") or []):
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            name, inp = block.get("name", ""), block.get("input") or {}
+            if name in ACTIVITY_VERBS and inp.get("file_path"):
+                return f"{ACTIVITY_VERBS[name]} {Path(str(inp['file_path'])).name}"
+            if name == "Bash":
+                return "Running " + str(inp.get("description") or inp.get("command", ""))[:70]
+            if name in ("Task", "Agent"):
+                return "Subagent: " + str(inp.get("description") or "working")[:70]
+            if name in ("Grep", "Glob"):
+                return "Searching the code"
+            if name == "TodoWrite":
+                return "Planning"
+            if name.endswith(("get_handoff", "get_item")):
+                return "Reading the tasks and screenshots"
+        return None
+    item = ev.get("item") if isinstance(ev.get("item"), dict) else None
+    if item and ev.get("type") == "item.started":
+        if item.get("type") == "command_execution":
+            return "Running " + str(item.get("command", ""))[:70]
+        if item.get("type") == "file_change":
+            return "Editing files"
+    return None
+
+
 def _explain_failure(agent: str, summary: str) -> str:
     low = summary.lower()
     if "not logged in" in low or "/login" in low or "please log in" in low or "authentication" in low:
@@ -788,7 +986,7 @@ def _parse(line: str) -> Optional[dict]:
 
 # ------------------------------------------------------------------ views
 STATE_LABELS = {None: "Approved", "sending": "Sending", "sent": "Sent to agent", "working": "Working", "checking": "Working",
-                "ready": "Ready", "needs_you": "Needs you"}
+                "ready": "Ready", "needs_you": "Needs you", "done": "Done"}
 
 
 def task_dict(s, w: WorkItem, previews: Optional[PreviewManager] = None) -> dict:  # noqa: ANN001

@@ -11,8 +11,9 @@ MAX_SLUG = 48
 
 # Words that make a title longer without saying what it's about.
 _FILLER = {
-    "a", "an", "the", "is", "are", "was", "be", "it", "its", "this", "that", "these", "those", "there", "should", "would",
-    "could", "can", "please", "just", "really", "very", "some", "when", "then", "so", "of", "to", "for", "on", "in", "at",
+    "a", "an", "the", "is", "are", "was", "be", "it", "its", "it's", "this", "that", "these", "those", "there", "should",
+    "would", "could", "can", "please", "just", "say", "says", "said", "really", "very", "some", "when", "then", "so", "of",
+    "to", "for", "on", "in", "at",
     "i", "we", "you", "me", "my", "our", "maybe", "need", "needs", "make", "made", "get", "gets", "got", "seems", "kind",
 }
 _LEAD_VERBS = {"fix", "fixes", "fixed", "add", "adds", "make", "update", "improve", "change", "remove", "check", "investigate"}

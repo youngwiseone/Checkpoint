@@ -8,10 +8,10 @@ import { Banner, Modal, TypeBadge, fmtDate, useToast } from "./ui";
 import { useSettings } from "../state";
 
 const PILL: Record<FlowTaskState, string> = {
-  approved: "neutral", sending: "accent", sent: "accent", working: "accent", checking: "accent", ready: "success", needs_you: "warn", merged: "outline",
+  approved: "neutral", sending: "accent", sent: "accent", working: "accent", checking: "accent", ready: "success", needs_you: "warn", merged: "outline", done: "outline",
 };
 const STATE_LABEL: Record<FlowTaskState, string> = {
-  approved: "Approved", sending: "Sending", sent: "Sent to agent", working: "Working", checking: "Checking", ready: "Ready", needs_you: "Needs you", merged: "Merged",
+  approved: "Approved", sending: "Sending", sent: "Sent to agent", working: "Working", checking: "Checking", ready: "Ready", needs_you: "Needs you", merged: "Merged", done: "Done",
 };
 const BUSY_TASK: FlowTaskState[] = ["sending", "sent", "working", "checking"];
 const BUSY_RUN: FlowRun["state"][] = ["queued", "starting", "running", "checking"];
@@ -75,9 +75,12 @@ function NameEditor({ flow }: { flow: Flow }) {
   );
 }
 
-function TaskRow({ t, onAction, busy, hasPreview }: { t: FlowTask; onAction: (path: string, ok: string) => void; busy: boolean; hasPreview: boolean }) {
+function TaskRow({ t, onAction, busy, hasPreview }: { t: FlowTask; onAction: (path: string, ok: string, body?: unknown) => void; busy: boolean; hasPreview: boolean }) {
+  const [answering, setAnswering] = useState(false);
+  const [reply, setReply] = useState("");
   return (
-    <div className="row top" style={{ padding: "7px 2px", borderTop: "1px solid var(--border)", opacity: t.state === "merged" ? 0.7 : 1 }}>
+    <div style={{ borderTop: "1px solid var(--border)", opacity: t.state === "merged" || t.state === "done" ? 0.7 : 1 }}>
+    <div className="row top" style={{ padding: "7px 2px" }}>
       <span className="mono muted" style={{ width: 44, flex: "none", paddingTop: 1 }}>{t.code || "·"}</span>
       <div className="grow">
         <div className="row" style={{ gap: 8 }}>
@@ -91,14 +94,37 @@ function TaskRow({ t, onAction, busy, hasPreview }: { t: FlowTask; onAction: (pa
         {(BUSY_TASK.includes(t.state) || t.checking) && <span className="spinner" style={{ width: 11, height: 11 }} aria-hidden />}
         {t.label || STATE_LABEL[t.state] || t.state}
       </span>
-      {(t.state === "needs_you" || t.state === "ready") && (
-        <button className="btn sm" disabled={busy} onClick={() => onAction(`/api/tasks/${t.id}/resend`, "Moved back to approved")} title="Send this task to the agent again">
+      {t.state === "ready" && (
+        <button className="btn sm" disabled={busy} onClick={() => onAction(`/api/tasks/${t.id}/works`, `${t.code} done`)} title="You tried it and it works">Works</button>
+      )}
+      {(t.state === "ready" || t.state === "needs_you") && (
+        <button className="btn sm ghost" disabled={busy} onClick={() => onAction(`/api/tasks/${t.id}/still-broken`, "Added a follow-up card: review it with the others")} title="Make a follow-up card for what's still wrong">Still broken</button>
+      )}
+      {t.state === "needs_you" && (
+        <button className="btn sm" disabled={busy} onClick={() => setAnswering((a) => !a)} title="Answer the agent and send the task back">Answer</button>
+      )}
+      {t.state === "needs_you" && (
+        <button className="btn sm ghost" disabled={busy} onClick={() => onAction(`/api/tasks/${t.id}/resend`, "Moved back to approved")} title="Send this task to the agent again">
           <RotateCw size={13} /> Send again
         </button>
       )}
       {t.state === "merged" && (
         <button className="btn sm" disabled={busy} onClick={() => onAction(`/api/tasks/${t.id}/unmerge`, "Now its own task")}>Keep separate</button>
       )}
+    </div>
+    {answering && (
+      <form className="row top" style={{ padding: "0 2px 8px 46px", gap: 8 }} onSubmit={(e) => {
+        e.preventDefault();
+        if (!reply.trim()) return;
+        onAction(`/api/tasks/${t.id}/answer`, "Answered: send approved to send it back", { text: reply.trim() });
+        setAnswering(false);
+        setReply("");
+      }}>
+        <textarea className="textarea grow" rows={2} autoFocus value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Your answer"
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) e.currentTarget.form?.requestSubmit(); }} />
+        <button className="btn sm primary" disabled={!reply.trim() || busy}>Save</button>
+      </form>
+    )}
     </div>
   );
 }
@@ -192,7 +218,7 @@ export default function SessionFlow({ sessionId, style }: { sessionId: string; s
   });
   const refresh = () => { qc.invalidateQueries({ queryKey: ["flow", sessionId] }); };
   const act = useMutation({
-    mutationFn: (v: { path: string; ok?: string }) => api.post<{ url?: string; merged?: boolean; message?: string }>(v.path),
+    mutationFn: (v: { path: string; ok?: string; body?: unknown }) => api.post<{ url?: string; merged?: boolean; message?: string }>(v.path, v.body),
     onSuccess: (r, v) => {
       refresh();
       if (v.path.endsWith("/merge")) toast(r?.merged ? "success" : "warning", r?.message || (r?.merged ? "Merged" : "Not merged"));
@@ -241,6 +267,7 @@ export default function SessionFlow({ sessionId, style }: { sessionId: string; s
         <NameEditor key={s.title} flow={f} />
         {p.agent !== "none" && <span className="badge outline">{p.agent_label}</span>}
         {pending > 0 && <span className="small text-2 nowrap">{plural(pending, "card")} to review: press <kbd>{settings?.hotkeys.review || "Ctrl+F9"}</kbd></span>}
+        {!!f.incoming && <span className="small muted nowrap" title="Screenshots become cards once the speech around them is transcribed">{f.incoming} more on the way</span>}
         <button className="btn primary sm" disabled={approved === 0 || loadPlan.isPending || send.isPending} onClick={() => loadPlan.mutate()}>
           <Send size={14} /> Send approved ({approved})
         </button>
@@ -263,7 +290,7 @@ export default function SessionFlow({ sessionId, style }: { sessionId: string; s
 
       {f.tasks.length > 0 && (
         <div>
-          {tasks.map((t) => <TaskRow key={t.id} t={t} busy={busy} hasPreview={p.has_preview} onAction={(path, ok) => act.mutate({ path, ok })} />)}
+          {tasks.map((t) => <TaskRow key={t.id} t={t} busy={busy} hasPreview={p.has_preview} onAction={(path, ok, body) => act.mutate({ path, ok, body })} />)}
           {f.tasks.length > 8 && <button className="btn ghost sm" onClick={() => setShowAllTasks(!showAllTasks)}>{showAllTasks ? "Show fewer" : `Show all ${f.tasks.length}`}</button>}
         </div>
       )}

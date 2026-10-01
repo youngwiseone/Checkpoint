@@ -8,6 +8,7 @@ is still healthy (its URL answers, or its process is still running when there's 
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import signal
@@ -207,4 +208,10 @@ class PreviewManager:
         pv = self.get(session_id)
         if pv is None or not commit or not pv.commit or not pv.healthy():
             return False
-        return pv.commit == commit or ws.is_ancestor(pv.cwd, commit, pv.commit)
+        return pv.commit == commit or _contains(pv.cwd, commit, pv.commit)
+
+
+@functools.lru_cache(maxsize=512)
+def _contains(cwd: str, commit: str, head: str) -> bool:
+    """Commits never change, so the answer for a pair never does (the UI asks every second or so)."""
+    return ws.is_ancestor(cwd, commit, head)

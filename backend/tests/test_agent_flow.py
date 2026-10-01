@@ -342,3 +342,100 @@ def test_send_needs_project_setup(app_env):
     assert plan["problems"] and "repository" in plan["problems"][0]
     with pytest.raises(agents.SendError):
         agents.send(sid)
+
+
+# ------------------------------------------------------------------ flow tweaks
+def test_working_copy_is_prepared_before_the_first_send(app_env, repo, tmp_path, monkeypatch):
+    from checkpoint.db import read_session
+    from checkpoint.models import Session
+    from checkpoint.services import agents, flow
+    from checkpoint.services.preview import PreviewManager
+
+    _fake_agent(monkeypatch, tmp_path)
+    pid = _project(repo)
+    sid = _session(pid)
+    flow.approve(_card(pid, sid, "Water deaths after sinking"))
+    worker = agents.AgentWorker(PreviewManager())
+    assert worker._prepare_some(set())
+    worker._threads[sid].join(30)
+    with read_session() as s:
+        wt = s.get(Session, sid).worktree_path
+    assert wt and _git(wt, "branch", "--show-current").startswith("checkpoint/prep-")
+    (repo / "later.txt").write_text("base moved on\n")  # the base branch moves while you review
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "later")
+    res = agents.send(sid)
+    _run_queued(worker)
+    assert _git(wt, "branch", "--show-current") == res["branch"]  # renamed, same folder
+    assert (pathlib_path(wt) / "later.txt").exists()  # caught up before the agent started
+    assert "T-1: fix it" in _git(wt, "log", "--format=%s")
+
+
+def pathlib_path(p):
+    from pathlib import Path
+
+    return Path(p)
+
+
+def test_trying_the_result_closes_the_loop(app_env, repo, monkeypatch):
+    from checkpoint.db import read_session, write_session
+    from checkpoint.models import DraftItem, WorkItem
+    from checkpoint.services import agents, flow
+    from checkpoint.services.overlay_model import OverlayModel
+
+    monkeypatch.setattr(agents, "find_agent", lambda a: sys.executable)
+    pid = _project(repo)
+    sid = _session(pid)
+    flow.approve(_card(pid, sid, "Water deaths after sinking"))
+    flow.approve(_card(pid, sid, "Kill cam unclear on death"))
+    agents.send(sid)
+    with write_session() as s:
+        t1, t2 = s.query(WorkItem).order_by(WorkItem.task_number).all()
+        t1.agent_state, t2.agent_state, t2.agent_note = "ready", "needs_you", "Label it Replay or Kill cam?"
+        t1_id, t2_id = t1.id, t2.id
+
+    m = OverlayModel()
+    m.open(sid)
+    m.key("tab")
+    assert m.mode == "tasks" and m.task_id == t1_id
+    m.key("y")  # it works
+    with read_session() as s:
+        assert s.get(WorkItem, t1_id).work_status == "done"
+    assert m.task_id == t2_id
+    m.key("e")
+    assert m.mode == "answer" and not m.key("a")  # typing, not acting
+    m.typed("Call it Replay")
+    m.save_answer()
+    with read_session() as s:
+        w = s.get(WorkItem, t2_id)
+        assert w.agent_state is None and "Call it Replay" in w.description and "Replay or Kill cam?" in w.description
+    agents.send(sid)
+    with read_session() as s:
+        assert s.get(WorkItem, t2_id).task_number == 2  # keeps its T-number when sent again
+
+    # Still broken after a fix: a follow-up card, in edit mode, matched to the task when approved.
+    with write_session() as s:
+        s.get(WorkItem, t2_id).agent_state = "ready"
+    m.refresh()
+    m.mode, m.task_id = "tasks", t2_id
+    m.key("f")
+    assert m.mode == "edit" and m.card["title"].startswith("Still broken: Kill cam")
+    m.typed("Still broken: Kill cam unclear on death\n\nNo label at all now")
+    m.save_edit()
+    m.key("a")
+    plan = agents.plan(sid)
+    assert plan["tasks"][0]["follow_up_of"] == "T-2"
+    assert m.mode == "confirm"  # the last card went straight to the send step
+    with read_session() as s:
+        assert s.query(DraftItem).filter_by(review_state="pending").count() == 0
+
+
+def test_agent_activity_lines():
+    from checkpoint.services.agents import activity
+
+    ev = {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Edit", "input": {"file_path": "C:/g/water.go"}}]}}
+    assert activity(ev) == "Editing water.go"
+    ev = {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Task", "input": {"description": "Fix kill cam"}}]}}
+    assert activity(ev) == "Subagent: Fix kill cam"
+    assert activity({"type": "item.started", "item": {"type": "command_execution", "command": "go test ./..."}}) == "Running go test ./..."
+    assert activity({"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}}) is None

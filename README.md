@@ -64,8 +64,9 @@ The everyday loop runs from shortcuts, without opening the main window:
 1. **Capture.** F8 / Shift+F8 / F9 as above. With audio on, an F8 press (or an auto screenshot) becomes a
    *suggested* card as soon as the speech around it is transcribed, so you don't have to end the session.
 2. **Review with Ctrl+F9.** One card at a time with its screenshot: **A** approve, **D** dismiss, **U** undo,
-   **E** edit (the first line is the title; **Ctrl+Enter** saves), **N** rename the session, **Tab** task status,
-   **Esc** hides it from anywhere and keeps your place and any unsaved text. Letter keys never act while you type.
+   **E** edit (the first line is the title; **Ctrl+Enter** saves), **N** rename the session, **R** restart the preview,
+   **Tab** task status, **Esc** hides it from anywhere and keeps your place and any unsaved text. Letter keys never act
+   while you type. Reviewing the last card goes straight to the send step.
    The overlay opens on the running session, else the project whose program is in the foreground, and only asks
    when several projects have work waiting.
 3. **Send with S** (or *Send approved*). It shows how many tasks go where (agent, branch, repo) before sending.
@@ -77,6 +78,12 @@ The everyday loop runs from shortcuts, without opening the main window:
 5. **Ready to refresh.** After the agent finishes, Checkpoint runs the project's check command and restarts the
    preview from the session's working copy. A task is only Ready when that preview is running a commit that
    contains its change.
+6. **Try it, then close the loop** in the overlay's task view (**Tab**, **J/K** to pick): **Y** it works (Done),
+   **F** still broken (a follow-up card for that task, ready to type into), **E** answers a task that needs you
+   (the answer goes back with it), **A** sends it again.
+
+While you review, the session's working copy is already being made in the background (and its setup command run),
+so a send starts straight away. The agent's current step ("Editing water.go") shows in the overlay.
 
 **Names and branches.** A session's name is suggested from its tasks and refined while you review. The first send
 locks it and creates `checkpoint/<name>` (with `-2` only if that's taken) in its own worktree under the data folder;

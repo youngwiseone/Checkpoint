@@ -353,7 +353,7 @@ export interface RepoInspect {
   branches: string[];
 }
 
-export type FlowTaskState = "approved" | "sending" | "sent" | "working" | "checking" | "ready" | "needs_you" | "merged";
+export type FlowTaskState = "approved" | "sending" | "sent" | "working" | "checking" | "ready" | "needs_you" | "merged" | "done";
 
 export interface FlowTask {
   id: string;
@@ -418,6 +418,7 @@ export interface SessionFlow {
     problems: string[];
   };
   counts: Partial<Record<FlowTaskState, number>> & { pending: number };
+  incoming?: number;
   tasks: FlowTask[];
   runs: FlowRun[];
   preview: PreviewStatus | null;

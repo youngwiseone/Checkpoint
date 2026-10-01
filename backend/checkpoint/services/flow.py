@@ -129,9 +129,24 @@ def state(session_id: str, previews=None) -> dict:  # noqa: ANN001
         drafts = s.scalars(select(DraftItem).where(DraftItem.session_id == session_id, DraftItem.review_state == "pending",
                                                    DraftItem.merged_into_id.is_(None)).order_by(DraftItem.created_at)).all()
         cards = [_card(s, d, sent) for d in drafts]
+        from .suggestions import _pending_markers
+
+        incoming = len(_pending_markers(s, session_id))
     flow["cards"] = cards
+    flow["incoming"] = incoming  # screenshots that become cards once their speech is transcribed
     flow["approved_unsent"] = flow["counts"].get("approved", 0)
     return flow
+
+
+def waiting_count(session_id: Optional[str], project_id: Optional[str] = None) -> int:
+    """Cards waiting for review, for toasts and the tray."""
+    with read_session() as s:
+        q = select(DraftItem.id).where(DraftItem.review_state == "pending", DraftItem.merged_into_id.is_(None))
+        if session_id:
+            q = q.where(DraftItem.session_id == session_id)
+        elif project_id:
+            q = q.where(DraftItem.project_id == project_id)
+        return len(s.scalars(q).all())
 
 
 # ------------------------------------------------------------------ actions (each returns the draft's session)

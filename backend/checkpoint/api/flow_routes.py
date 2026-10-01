@@ -135,6 +135,36 @@ def resend(iid: str) -> dict:
         raise _bad(e) from e
 
 
+@router.post("/tasks/{iid}/works")
+def task_works(iid: str) -> dict:
+    try:
+        agents.mark_works(iid)
+    except agents.SendError as e:
+        raise _bad(e) from e
+    return {"ok": True}
+
+
+@router.post("/tasks/{iid}/still-broken")
+def task_still_broken(iid: str) -> dict:
+    try:
+        return {"draft_id": agents.still_broken(iid)}
+    except agents.SendError as e:
+        raise _bad(e) from e
+
+
+class AnswerIn(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/tasks/{iid}/answer")
+def task_answer(iid: str, body: AnswerIn) -> dict:
+    try:
+        agents.answer(iid, body.text)
+    except agents.SendError as e:
+        raise _bad(e) from e
+    return {"ok": True}
+
+
 @router.post("/tasks/{iid}/unmerge")
 def unmerge(iid: str) -> dict:
     agents.dismiss_duplicate(iid)
@@ -182,14 +212,10 @@ def preview(sid: str, action: str) -> dict:
         return pm.status(sid)
     if action != "restart":
         raise HTTPException(404, "Unknown action")
-    if not sess.worktree_path:
-        raise HTTPException(409, "This session has no working copy yet. It's created when you first send tasks.")
-    if not proj.preview_command.strip():
-        raise HTTPException(409, f"Set a preview command for “{proj.name}” first (Settings → Projects).")
-    pv = pm.start(sid, proj.id, sess.worktree_path, proj.preview_command, proj.preview_url)
-    if pv.state != "running":
-        raise HTTPException(409, pv.error or "The preview didn't start")
-    hooks.emit_state()
+    try:
+        agents.restart_preview(sid, pm)
+    except agents.SendError as e:
+        raise _bad(e, 409) from e
     return pm.status(sid)
 
 
@@ -260,6 +286,11 @@ def merge_pr(sid: str) -> dict:
         ws.run_gh(["pr", "merge", sess.branch, "--merge"], sess.worktree_path, timeout=300)
     except ws.GitError as e:
         raise _bad(e, 409) from e
+    from ..models import WorkItem, utcnow
+
+    with write_session() as s:  # merged: what you saw working is done
+        for w in s.query(WorkItem).filter(WorkItem.session_id == sid, WorkItem.agent_state == "ready").all():
+            w.agent_state, w.work_status, w.completed_at = "done", "done", utcnow()
     return {"merged": True}
 
 

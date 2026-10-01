@@ -1,11 +1,14 @@
 """State and key handling for the review overlay, without Qt (so it can be tested).
 
 Modes
-  review   one card at a time: A approve, D dismiss, E edit, U undo, S send approved, N rename, Tab tasks
+  review   one card at a time: A approve, D dismiss, E edit, U undo, S send approved, N rename, R restart preview,
+           Tab tasks. Reviewing the last card goes straight to the send step when something is approved.
   edit     typing in the card's text box: letter keys are text; Ctrl+Enter saves
   rename   typing the session name: Enter saves
   confirm  about to send: Enter or S sends, Backspace goes back
-  tasks    where the session's sent tasks stand
+  tasks    where the session's tasks stand, J/K to pick one: Y it works, F still broken, E answer the agent's
+           question, A send again, R restart preview
+  answer   typing an answer to the agent's question: Ctrl+Enter saves it and puts the task back to approved
   choose   which session to review, when that's unclear (1-9 picks)
 Esc hides the overlay from any mode. Nothing is lost: the mode, the current card and any
 unsaved edit text are kept and come back when the overlay reopens.
@@ -18,6 +21,15 @@ from typing import Any, Callable, Optional
 
 from . import agents, flow
 from .review import ReviewError
+
+
+def _inline(fn, done) -> None:  # noqa: ANN001
+    try:
+        r = fn()
+    except Exception as e:  # noqa: BLE001
+        done(None, e)
+        return
+    done(r, None)
 
 
 @dataclass
@@ -42,7 +54,11 @@ class OverlayModel:
     message: str = ""
     error: str = ""
     plan: Optional[dict] = None
+    task_id: Optional[str] = None  # selected in the tasks view
     on_change: Callable[[], None] = lambda: None
+    # Runs slow work (restarting the preview); the overlay passes one that uses a thread. Tests run it inline.
+    run_async: Callable[[Callable[[], Any], Callable[[Any, Optional[Exception]], None]], None] = field(
+        default=lambda fn, done: _inline(fn, done))
 
     # -------------------------------------------------------------- loading
     def open(self, active_session_id: Optional[str], window: Optional[dict] = None) -> None:
@@ -85,11 +101,22 @@ class OverlayModel:
             self.current_id = ids[0] if ids else None
         if self.mode == "edit" and self.current_id not in self.edits:
             self.mode = "review"
+        tids = [t["id"] for t in self.tasks]
+        if self.task_id not in tids:
+            self.task_id = tids[0] if tids else None
 
     # -------------------------------------------------------------- views
     @property
     def cards(self) -> list[dict]:
         return self.state.get("cards", [])
+
+    @property
+    def tasks(self) -> list[dict]:
+        return [t for t in self.state.get("tasks", []) if t["state"] != "done" or t["id"] == self.task_id]
+
+    @property
+    def task(self) -> Optional[dict]:
+        return next((t for t in self.tasks if t["id"] == self.task_id), None)
 
     @property
     def card(self) -> Optional[dict]:
@@ -132,17 +159,16 @@ class OverlayModel:
                 return True
             return False
         if self.mode == "tasks":
-            if k in ("tab", "t"):
-                self.mode = "review"
-                return True
-            if k == "s":
-                self.ask_send()
-                return True
+            actions = {"tab": self.show_cards, "t": self.show_cards, "s": self.ask_send, "j": lambda: self._step_task(1),
+                       "down": lambda: self._step_task(1), "k": lambda: self._step_task(-1), "up": lambda: self._step_task(-1),
+                       "y": self.works, "f": self.still_broken, "e": self.begin_answer, "a": self.send_again,
+                       "r": self.restart_preview}
+        elif self.mode == "review":
+            actions = {"a": self.approve, "d": self.dismiss, "e": self.begin_edit, "u": self.undo, "s": self.ask_send,
+                       "n": self.begin_rename, "tab": self.show_tasks, "t": self.show_tasks, "j": self.next, "k": self.prev,
+                       "r": self.restart_preview}
+        else:
             return False
-        if self.mode != "review":
-            return False
-        actions = {"a": self.approve, "d": self.dismiss, "e": self.begin_edit, "u": self.undo, "s": self.ask_send,
-                   "n": self.begin_rename, "tab": self.show_tasks, "t": self.show_tasks, "j": self.next, "k": self.prev}
         fn = actions.get(k)
         if fn is None:
             return False
@@ -176,6 +202,7 @@ class OverlayModel:
             self.message = f"Approved “{c['title']}”"
             if c.get("similar_to"):
                 self.message += f" · looks like {c['similar_to']['code']}, so it'll be added there as evidence"
+            self._offer_send()
 
     def dismiss(self) -> None:
         c = self.card
@@ -188,6 +215,21 @@ class OverlayModel:
             self.reviewed += 1
             self.edits.pop(c["id"], None)
             self.message = f"Dismissed “{c['title']}” · U to undo"
+            self._offer_send()
+
+    def _offer_send(self) -> None:
+        """After the last card, go straight to the send step (Backspace goes back)."""
+        if self.cards or not self.approved_unsent:
+            return
+        try:
+            plan = agents.plan(self.session_id)
+        except agents.SendError:
+            return
+        if plan["problems"]:
+            self.message += " · all reviewed. Set up the project in Settings → Projects to send it."
+            return
+        if plan["count"] or plan["merges"]:
+            self.plan, self.mode = plan, "confirm"
 
     def undo(self) -> None:
         if not self.history:
@@ -224,6 +266,8 @@ class OverlayModel:
         """Keeps what's in the text box, so hiding the overlay never loses it."""
         if self.mode == "edit" and self.current_id:
             self.edits[self.current_id] = text
+        elif self.mode == "answer" and self.task_id:
+            self.edits["answer:" + self.task_id] = text
         elif self.mode == "rename":
             self.name_edit = text
 
@@ -269,10 +313,85 @@ class OverlayModel:
         self.name_edit = None
         self.mode = "review"
 
-    # -------------------------------------------------------------- sending
+    # -------------------------------------------------------------- tasks: trying the result
     def show_tasks(self) -> None:
         self.mode = "tasks"
 
+    def show_cards(self) -> None:
+        self.mode = "review"
+
+    def _step_task(self, d: int) -> None:
+        ids = [t["id"] for t in self.tasks]
+        if ids:
+            i = ids.index(self.task_id) if self.task_id in ids else 0
+            self.task_id = ids[(i + d) % len(ids)]
+
+    def works(self) -> None:
+        t = self.task
+        if t is None:
+            return
+        self._guard(lambda: agents.mark_works(t["id"]))
+        if not self.error:
+            self.message = f"{t['code']} done"
+            self._step_task(1)
+
+    def still_broken(self) -> None:
+        t = self.task
+        if t is None:
+            return
+        made: dict = {}
+        self._guard(lambda: made.update(id=agents.still_broken(t["id"])))
+        if made.get("id"):
+            self.current_id = made["id"]
+            self.edits[made["id"]] = f"Still broken: {t['title']}\n\n"
+            self.mode = "edit"
+            self.message = f"Say what's still wrong with {t['code']}, then Ctrl+Enter and A to approve it as a follow-up."
+
+    def send_again(self) -> None:
+        t = self.task
+        if t is None:
+            return
+        self._guard(lambda: agents.resend(t["id"]))
+        if not self.error:
+            self.message = f"{t['code']} is approved again · S to send"
+
+    def begin_answer(self) -> None:
+        t = self.task
+        if t is None or t["state"] != "needs_you":
+            self.error = "Pick a task that needs you (J/K) to answer it."
+            return
+        self.edits.setdefault("answer:" + t["id"], "")
+        self.mode = "answer"
+
+    def answer_text(self) -> str:
+        return self.edits.get("answer:" + (self.task_id or ""), "")
+
+    def save_answer(self) -> None:
+        t = self.task
+        if t is None or self.mode != "answer":
+            return
+        text = self.answer_text()
+        self._guard(lambda: agents.answer(t["id"], text))
+        if not self.error:
+            self.edits.pop("answer:" + t["id"], None)
+            self.mode = "tasks"
+            self.message = f"Answered {t['code']} · S to send it back to the agent"
+
+    def restart_preview(self) -> None:
+        if not self.session_id:
+            return
+        self.message = "Restarting the preview from this session's working copy…"
+        sid = self.session_id
+
+        def done(_r, e) -> None:  # noqa: ANN001
+            self.error = str(e) if e else ""
+            self.message = "" if e else "Preview restarted with the latest changes"
+            self.refresh()
+            self.on_change()
+
+        self.run_async(lambda: agents.restart_preview(sid, self.previews), done)
+
+    # -------------------------------------------------------------- sending
     def ask_send(self) -> None:
         if not self.session_id:
             return

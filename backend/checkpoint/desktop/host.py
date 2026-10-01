@@ -221,14 +221,21 @@ class DesktopHost:
         if self.core.appwatch.offer and self.core.sessions.active is None:
             self._quick_start()
 
+    def _waiting_hint(self) -> str:
+        from ..services.flow import waiting_count
+
+        a = self.core.sessions.active
+        n = waiting_count(a.id if a else None, None if a else get_settings().last_project_id)
+        return f" · {n} to review ({get_settings().hotkeys.review})" if n else ""
+
     def _save_note(self, payload: dict, text: str, category: Optional[str]) -> Optional[str]:
         try:
             if payload.get("id"):
                 self.core.capture.save_capture_note(payload["id"], text, category)
-                self.toast.show_message("success", "Saved as a card for review", payload.get("work_rect"))
+                self.toast.show_message("success", "Saved as a card" + self._waiting_hint(), payload.get("work_rect"))
             else:
                 self.core.capture.quick_note(text, category, mono=payload.get("mono"))
-                self.toast.show_message("success", "Note saved as a card for review", payload.get("work_rect"))
+                self.toast.show_message("success", "Note saved as a card" + self._waiting_hint(), payload.get("work_rect"))
         except ValueError as e:
             return str(e)
         except Exception as e:  # noqa: BLE001
@@ -288,6 +295,14 @@ class DesktopHost:
     def _refresh_tray(self) -> None:
         st = self.core.sessions.status()
         live = bool(st.get("active"))
+        try:
+            from ..services.flow import waiting_count
+
+            n = waiting_count(st.get("session_id"), None if live else get_settings().last_project_id)
+        except Exception:  # noqa: BLE001
+            n = 0
+        hk = get_settings().hotkeys.review
+        self.act_review.setText(f"Review and send ({n} waiting)  ({hk})" if n else f"Review and send  ({hk})")
         for a in (self.act_pause, self.act_mic, self.act_loop, self.act_auto, self.act_end):
             a.setVisible(live)
         self.act_start.setVisible(not live)

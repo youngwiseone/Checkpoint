@@ -149,8 +149,9 @@ class CaptureService:
                 notices.push("info", "Screenshot saved to Unfinished captures — add context from the app.", "capture")
         else:
             label = fmt_offset(cap["offset_ms"])
+            hint = f" · becomes a card once transcribed ({settings.hotkeys.review} to review)"
             hooks.emit_toast("success" if not g.warnings else "warning",
-                             g.warnings[0] if g.warnings else f"Screenshot saved · marker at {label}", g.work_rect)
+                             g.warnings[0] if g.warnings else f"Screenshot saved at {label}{hint}", g.work_rect)
         hooks.emit_state()
         return payload
 
