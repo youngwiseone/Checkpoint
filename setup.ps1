@@ -1,6 +1,6 @@
 # Checkpoint - one-time setup for Windows (no admin rights needed).
 # Usage (from this folder):  powershell -ExecutionPolicy Bypass -File setup.ps1
-# Creates .venv, installs pinned Python packages, builds the interface.
+# Creates .venv, installs pinned Python packages for the native desktop app.
 # It never downloads speech or AI models - that's an explicit action in Settings.
 
 $ErrorActionPreference = "Stop"
@@ -53,31 +53,6 @@ if ($LASTEXITCODE -ne 0) { Fail "pip upgrade failed. Check your internet connect
 & $venvPy -m pip install -r backend\requirements.txt --disable-pip-version-check
 if ($LASTEXITCODE -ne 0) { Fail "Installing packages failed. Scroll up for the error; a network or proxy issue is the usual cause." }
 
-# ---------------------------------------------------------------- interface
-Step "Building the interface"
-$node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) {
-    if (Test-Path "frontend\dist\index.html") {
-        Write-Host "    Node.js not found - using the existing prebuilt interface." -ForegroundColor Yellow
-    } else {
-        Fail "Node.js 20+ is needed to build the interface. Install the LTS version from https://nodejs.org and run setup.ps1 again."
-    }
-} else {
-    $nodeVer = (& node -p "process.versions.node").Trim()
-    if ([int]($nodeVer.Split(".")[0]) -lt 20) { Fail "Node.js $nodeVer is too old; install Node.js 20 LTS or newer." }
-    Push-Location frontend
-    try {
-        if (Test-Path "package-lock.json") { & npm ci --no-audit --no-fund } else { & npm install --no-audit --no-fund }
-        if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
-        & npm run build
-        if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
-    } catch {
-        Pop-Location
-        Fail "Building the interface failed: $_"
-    }
-    Pop-Location
-}
-
 # ---------------------------------------------------------------- config
 if (-not (Test-Path ".env")) { Copy-Item ".env.example" ".env"; Write-Host "    Created .env from .env.example" }
 
@@ -91,5 +66,5 @@ if ($ok -ne 0) { Fail "Preflight reported errors (see above)." }
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host "  Start Checkpoint:  start.cmd"
-Write-Host "  Optional: download a transcription model and set up Ollama in Settings (see docs\models.md)."
+Write-Host "  Optional: hold the capture key, open Settings, and download a transcription model."
 Write-Host ""

@@ -1,13 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Camera, Check, FileAudio, Pencil, Play, Plus, RotateCw, Sparkles, Trash2, X, Wand2, StopCircle, Inbox } from "lucide-react";
+import { AlertTriangle, Camera, Check, FileAudio, Pencil, Play, Plus, Trash2, StopCircle, Inbox } from "lucide-react";
 import { api, qs } from "../api";
 import type { Capture, ItemType, SessionDetail as SD, TimelineItem } from "../types";
 import { Banner, Empty, Modal, Spinner, TYPES, TYPE_LABEL, fmtBytes, fmtDate, fmtDuration, fmtOffset, useToast, Lightbox } from "../components/ui";
 import Checklist from "../components/Checklist";
-import SessionFlow from "../components/SessionFlow";
-import { useAppState } from "../state";
 
 const CATS: { v: string; l: string }[] = [{ v: "", l: "No category" }, ...TYPES.map((t) => ({ v: t, l: TYPE_LABEL[t] }))];
 
@@ -63,11 +61,11 @@ function CreateCardModal({ sessionId, projectId, segs, captureId, onClose }: { s
       segment_ids: segs.filter((s) => s.kind === "segment").map((s) => s.id), note_ids: segs.filter((s) => s.kind === "note").map((s) => s.id),
       capture_ids: captureId ? [captureId] : [],
     }),
-    onSuccess: () => { qc.invalidateQueries(); toast("success", "Card created — it's in the review inbox"); onClose(); },
+    onSuccess: () => { qc.invalidateQueries(); toast("success", "Task saved to inbox"); onClose(); },
     onError: (e: Error) => toast("error", e.message),
   });
   return (
-    <Modal title="Create a card" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!title.trim() || create.isPending} onClick={() => create.mutate()}>Create card</button></>}>
+    <Modal title="Create a task" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!title.trim() || create.isPending} onClick={() => create.mutate()}>Create task</button></>}>
       <div className="stack">
         <div className="field"><label htmlFor="ct">Type</label>
           <select id="ct" className="select" value={type} onChange={(e) => setType(e.target.value as ItemType)} style={{ maxWidth: 220 }}>{TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select></div>
@@ -130,85 +128,6 @@ function SegmentRow({ item, selected, onToggle, sessionEnded }: { item: Timeline
   );
 }
 
-function OrganisePanel({ d, aiEnabled }: { d: SD; aiEnabled: boolean }) {
-  const { data: appState } = useAppState();
-  const tw = appState?.workers.transcription;
-  const qc = useQueryClient();
-  const toast = useToast();
-  const run = d.latest_run;
-  const organise = useMutation({
-    mutationFn: () => api.post(`/api/sessions/${d.id}/organise`, { force: true }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["session", d.id] }),
-    onError: (e: Error) => toast("error", e.message),
-  });
-  const cancel = useMutation({ mutationFn: (id: string) => api.post(`/api/runs/${id}/cancel`), onSuccess: () => qc.invalidateQueries({ queryKey: ["session", d.id] }) });
-  const transcribe = useMutation({
-    mutationFn: () => api.post(`/api/sessions/${d.id}/transcribe`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["session", d.id] }); toast("info", "Transcription queued"); },
-    onError: (e: Error) => toast("error", e.message),
-  });
-  const t = d.transcription;
-  const total = t.queued + t.running + t.done + t.failed;
-  const active = run && (run.state === "queued" || run.state === "running");
-  const stats = run?.stats as Record<string, number | string | boolean> | undefined;
-  return (
-    <div className="card stack">
-      <div className="card-head" style={{ marginBottom: 0 }}><h3>Processing</h3></div>
-      {d.sources.length === 0 ? (
-        <p className="text-2 small">No audio was recorded in this session. Typed notes are already cards.</p>
-      ) : (
-        <div>
-          <div className="row"><FileAudio size={16} className="muted" /><b className="small">Transcription</b>
-            <span className="small text-2">{total === 0 ? "No audio blocks" : `${t.done} of ${total} audio blocks done`}{t.running ? " · working…" : ""}{t.queued && d.transcription_mode === "off" ? " · not started" : ""}</span>
-          </div>
-          {total > 0 && <div className="progress" style={{ marginTop: 6 }}><div style={{ width: `${(t.done / Math.max(1, total)) * 100}%` }} /></div>}
-          {tw?.stalled && tw.error && t.running > 0 && <p className="small" style={{ color: "var(--danger)", marginTop: 6 }}>{tw.error}</p>}
-          {tw?.gpu_fallback && total > t.done && <p className="small" style={{ color: "var(--warn)", marginTop: 6 }}>{tw.gpu_fallback}</p>}
-          {!tw?.model_installed && t.queued > 0 && <p className="small" style={{ color: "var(--warn)", marginTop: 6 }}>Model {tw?.model} isn't downloaded yet. Your audio is kept safely; download it in <Link to="/settings">Settings</Link> to transcribe.</p>}
-          {t.failed > 0 && <p className="small" style={{ color: "var(--danger)", marginTop: 6 }}>{t.failed} block(s) failed: {d.transcription_errors.join("; ")}</p>}
-          {(t.failed > 0 || (d.transcription_mode === "off" && t.queued > 0)) && (
-            <button className="btn sm" style={{ marginTop: 8 }} onClick={() => transcribe.mutate()}><RotateCw size={14} /> {t.failed ? "Retry transcription" : "Transcribe now"}</button>
-          )}
-          {d.raw_audio_deleted && <p className="small muted" style={{ marginTop: 6 }}>Raw audio was deleted; playback is unavailable.</p>}
-        </div>
-      )}
-      <hr className="divider" style={{ margin: "4px 0" }} />
-      <div>
-        <div className="row"><Sparkles size={16} className="muted" /><b className="small">Local AI organisation</b>
-          {run && <span className={`badge ${run.state === "done" ? "success" : run.state === "failed" ? "danger" : run.state === "cancelled" ? "neutral" : "accent"}`}>{run.state === "done" ? "Done" : run.state === "failed" ? "Failed" : run.state === "cancelled" ? "Cancelled" : run.state === "queued" ? "Queued" : "Running"}</span>}
-        </div>
-        {!aiEnabled ? (
-          <p className="small text-2" style={{ marginTop: 4 }}>Off. Typed notes are already cards; select transcript lines below to make cards yourself, or enable Local AI in <Link to="/settings">Settings</Link>.</p>
-        ) : (
-          <>
-            {active && (
-              <>
-                <p className="small text-2" style={{ marginTop: 4 }}>{run!.stage}</p>
-                <div className="progress" style={{ marginTop: 6 }}><div style={{ width: `${Math.round(run!.progress * 100)}%` }} /></div>
-                <button className="btn sm" style={{ marginTop: 8 }} onClick={() => cancel.mutate(run!.id)}><X size={14} /> Cancel</button>
-              </>
-            )}
-            {run?.state === "failed" && <p className="small" style={{ color: "var(--danger)", marginTop: 4 }}>{run.error}</p>}
-            {run?.state === "done" && stats && (
-              <p className="small text-2" style={{ marginTop: 4 }}>
-                {String(stats.created ?? 0)} new · {String(stats.updated ?? 0)} updated · {String(stats.preserved_human ?? 0)} kept as you edited them
-                {stats.withdrawn ? ` · ${stats.withdrawn} withdrawn in conversation` : ""}{stats.rejected_invalid_ids ? ` · ${stats.rejected_invalid_ids} unsupported suggestion(s) discarded` : ""}
-                {stats.untranscribed_chunks ? ` · ${stats.untranscribed_chunks} audio block(s) weren't transcribed yet` : ""} · {run.model}
-              </p>
-            )}
-            {!active && d.state !== "active" && d.state !== "paused" && (
-              <button className="btn sm" style={{ marginTop: 8 }} onClick={() => organise.mutate()} disabled={organise.isPending}>
-                <Wand2 size={14} /> {run ? "Reprocess" : "Organise now"}
-              </button>
-            )}
-            {!active && run && <p className="hint" style={{ marginTop: 6 }}>Reprocessing keeps your edits, approvals and dismissals.</p>}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function Recap({ sessionId }: { sessionId: string }) {
   type R = { planned: unknown[]; completed: unknown[]; outstanding: { id: string; text: string; state: string; work_item_id: string | null }[]; suggested_done: unknown[]; new_items: { pending: number; approved: number; dismissed: number; possibly_completed: { id: string; title: string }[]; by_type: Record<string, number> } };
   const q = useQuery({ queryKey: ["recap", sessionId], queryFn: () => api.get<R>(`/api/sessions/${sessionId}/recap`) });
@@ -246,7 +165,7 @@ function Recap({ sessionId }: { sessionId: string }) {
             </div>
           )}
           <p className="text-2 small">Approved {r.new_items.approved} · dismissed {r.new_items.dismissed}. Nothing is marked done automatically.</p>
-          <div><Link to={`/review${qs({ session: sessionId })}`} className="btn sm"><Inbox size={14} /> Review this session's cards</Link></div>
+          <div><Link to={`/review${qs({ session: sessionId })}`} className="btn sm"><Inbox size={14} /> Open inbox</Link></div>
         </div>
       </div>
     </div>
@@ -326,8 +245,7 @@ function DangerZone({ d }: { d: SD }) {
 
 export default function SessionDetail() {
   const { id } = useParams();
-  const { data: state } = useAppState();
-  const [tab, setTab] = useState<"recap" | "timeline">("recap");
+  const [tab, setTab] = useState<"recap" | "timeline">("timeline");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
   const [noteFor, setNoteFor] = useState<TimelineItem | null>(null);
@@ -352,7 +270,7 @@ export default function SessionDetail() {
             {s.sources.map((x) => ` · ${x.label}`).join("")}</p>
           {s.purpose && <p className="text-2">{s.purpose}</p>}
         </div>
-        <Link to={`/review${qs({ session: s.id })}`} className="btn primary"><Inbox size={16} /> Review cards{s.pending_cards ? ` (${s.pending_cards})` : ""}</Link>
+        <Link to={`/review${qs({ session: s.id })}`} className="btn primary"><Inbox size={16} /> Open inbox{s.pending_cards ? ` (${s.pending_cards})` : ""}</Link>
       </div>
       {s.audio_events.filter((e) => e.kind === "lost_on_crash" || e.kind === "interrupted").length > 0 && (
         <div style={{ marginBottom: 18 }}>
@@ -363,7 +281,6 @@ export default function SessionDetail() {
           </Banner>
         </div>
       )}
-      {!s.is_demo && <SessionFlow sessionId={s.id} style={{ marginBottom: 18 }} />}
       <div className="split split-right">
         <div>
           <div className="tabs" role="tablist">
@@ -375,10 +292,10 @@ export default function SessionDetail() {
           ) : (
             <div className="card">
               <div className="row" style={{ marginBottom: 10 }}>
-                <span className="grow text-2 small">Select lines to turn them into a card. Dotted underline = low recognition confidence.</span>
+                <span className="grow text-2 small">Select transcript lines to create a task. Dotted underline = low recognition confidence.</span>
                 {sel.size > 0 && <>
                   <button className="btn sm ghost" onClick={() => setSel(new Set())}>Clear</button>
-                  <button className="btn sm primary" onClick={() => setCreating(true)}><Plus size={14} /> Create card from {sel.size} line{sel.size === 1 ? "" : "s"}</button>
+                  <button className="btn sm primary" onClick={() => setCreating(true)}><Plus size={14} /> Create task from {sel.size} line{sel.size === 1 ? "" : "s"}</button>
                 </>}
               </div>
               {tl.isLoading ? <Spinner /> : !items.length ? <Empty title="Nothing on the timeline yet">No transcript, notes or screenshots.</Empty> : (
@@ -410,7 +327,6 @@ export default function SessionDetail() {
           )}
         </div>
         <div className="stack-lg">
-          <OrganisePanel d={s} aiEnabled={!!state?.ai_enabled} />
           {!s.is_demo && <DangerZone d={s} />}
           {sel.size === 0 && tab === "timeline" && <p className="hint"><Check size={13} /> Tip: correcting a misheard word keeps the original text and all card links.</p>}
         </div>

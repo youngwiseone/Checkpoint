@@ -84,7 +84,7 @@ export default function App() {
           {live && <span className={`nav-live ${liveCls}`} aria-label={s?.paused ? "Paused" : "Running"} />}
         </NavLink>
         <NavLink to="/items" className="nav-link">
-          <ListChecks size={18} /><span className="label">Items</span>
+          <ListChecks size={18} /><span className="label">Inbox</span>
           {!!state?.review.pending && <span className="count" title="Cards to review">{state.review.pending}</span>}
         </NavLink>
         <NavLink to="/settings" className="nav-link"><SettingsIcon size={18} /><span className="label">Settings</span></NavLink>

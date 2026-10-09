@@ -12,7 +12,7 @@ colorama==0.4.6
 cryptography==50.0.1
 ctranslate2==4.8.2
 fastapi==0.142.1
-faster-whisper==1.2.1
+cactus-needle==3.1.0
 filelock==4.0.7
 flatbuffers==25.12.19
 fsspec==2026.9.0

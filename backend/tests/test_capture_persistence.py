@@ -41,12 +41,12 @@ def test_typed_capture_to_done_survives_restart(app_env):
     q = cs.quick_note("Remember to check the reset-filters button")
     assert rv.get_draft(q["draft_id"])["type"] == "task"
 
-    rv.update_draft(res["draft_id"], {"title": "Use latest loaded date for range"})
+    rv.update_work_item(res["work_item_id"], {"title": "Use latest loaded date for range"})
     a1 = rv.approve([res["draft_id"]])
     a2 = rv.approve([res["draft_id"]])  # idempotent
     assert a1[0]["work_item_id"] == a2[0]["work_item_id"]
     wid = a1[0]["work_item_id"]
-    assert len(rv.list_work_items(pid)) == 1
+    assert len(rv.list_work_items(pid)) == 2
     rv.update_work_item(wid, {"work_status": "done"})
     sm.end()
 
@@ -61,7 +61,7 @@ def test_typed_capture_to_done_survives_restart(app_env):
     with read_session() as s:
         c = s.get(Capture, caps[0]["capture_id"])
         assert media_path(c.image_rel_path).read_bytes() == png
-    assert rv.review_counts(pid)["pending"] == 1  # the F9 note is still waiting
+    assert rv.review_counts(pid)["pending"] == 0  # notes enter the inbox immediately
 
 
 def test_escape_keeps_unfinished_and_discard_removes(app_env):

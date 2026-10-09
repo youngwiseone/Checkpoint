@@ -213,4 +213,4 @@ def test_old_default_settings_are_upgraded(app_env):
             s.add(Setting(key="app", value=value))
     invalidate_cache()
     ac = get_settings().auto_capture
-    assert (ac.enabled, ac.threshold, ac.cooldown_s, ac.max_per_session) == (True, 0.7, 45, 25)
+    assert (ac.enabled, ac.threshold, ac.cooldown_s, ac.max_per_session) == (False, 0.7, 45, 25)

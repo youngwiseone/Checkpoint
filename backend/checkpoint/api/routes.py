@@ -89,8 +89,6 @@ def state(after: int = 0) -> dict:
 def readiness() -> dict:
     from ..audio.devices import audio_available, list_devices
     from ..capture.screen import list_monitors
-    from ..extraction.ollama import OllamaProvider, ProviderError
-    from ..sharing.client import load_token
     from ..transcription.engine import model_installed
 
     st = get_settings()
@@ -99,7 +97,7 @@ def readiness() -> dict:
     hk = hooks.hotkey_status()
     if mons and hooks.desktop_available and hk.get("ok"):
         checks.append({"id": "screenshot", "label": "Screenshot capture", "state": "ready",
-                       "detail": f"{len(mons)} display(s) · hotkeys {st.hotkeys.capture}, {st.hotkeys.capture_context}, {st.hotkeys.quick_note}"})
+                       "detail": f"{len(mons)} display(s) · tap {st.hotkeys.capture} to capture, double tap for a note, hold to review"})
     elif mons and hooks.desktop_available:
         checks.append({"id": "screenshot", "label": "Screenshot capture", "state": "warning",
                        "detail": hk.get("reason") or "Some hotkeys couldn't be registered.",
@@ -122,31 +120,6 @@ def readiness() -> dict:
     checks.append({"id": "transcription", "label": "Transcription model", "state": "ready" if model_installed(m) else "unavailable",
                    "detail": f"{m} installed" if model_installed(m) else f"{m} not downloaded",
                    "remedy": None if model_installed(m) else "Optional. Download it in Settings → Transcription (one-time, needs internet)."})
-    if st.ai.enabled:
-        from ..extraction.ollama import ensure_running
-
-        ensure_running(st.ai.base_url, wait_s=10)
-    prov = OllamaProvider(st.ai.base_url)
-    ver = prov.version()
-    if not ver:
-        checks.append({"id": "ai", "label": "Local AI (Ollama)", "state": "unavailable", "detail": "Ollama isn't running",
-                       "remedy": "Optional. Install Ollama from ollama.com, start it, then pull a model in Settings → Local AI."})
-    else:
-        try:
-            names = [x["name"] for x in prov.list_models()]
-        except ProviderError:
-            names = []
-        has = any(n == st.ai.model or n.split(":")[0] == st.ai.model for n in names)
-        checks.append({"id": "ai", "label": "Local AI (Ollama)", "state": "ready" if has and st.ai.enabled else ("warning" if has else "unavailable"),
-                       "detail": f"Ollama {ver} · {st.ai.model} {'installed' if has else 'not installed'}" + ("" if st.ai.enabled else " · turned off"),
-                       "remedy": None if has else f"Pull {st.ai.model} in Settings → Local AI."})
-    if st.sharing.server_url:
-        tok = load_token(st.sharing.server_url)
-        checks.append({"id": "sharing", "label": "Shared connection", "state": "ready" if tok else "warning",
-                       "detail": st.sharing.server_url, "remedy": None if tok else "Save the workspace token in Settings → Sharing."})
-    else:
-        checks.append({"id": "sharing", "label": "Shared connection", "state": "unavailable", "detail": "Not configured",
-                       "remedy": "Optional. Everything works locally without a server."})
     return {"checks": checks}
 
 
@@ -744,23 +717,62 @@ def quick_note(body: NoteIn) -> dict:
         raise _bad(e) from e
 
 
+class CropIn(BaseModel):
+    x: int = Field(ge=0, strict=True)
+    y: int = Field(ge=0, strict=True)
+    width: int = Field(gt=0, strict=True)
+    height: int = Field(gt=0, strict=True)
+
+
+@router.post("/captures/{cid}/highlight")
+def highlight_capture(cid: str, body: CropIn) -> dict:
+    from ..services.cropping import crop
+    try:
+        return crop(cid, (body.x, body.y, body.width, body.height), highlight=True)
+    except ValueError as e:
+        raise _bad(e) from e
+
+
+@router.post("/captures/{cid}/crop")
+def crop_capture(cid: str, body: CropIn) -> dict:
+    from ..services.cropping import crop
+    try:
+        return crop(cid, (body.x, body.y, body.width, body.height))
+    except (ValueError, OSError) as e:
+        raise _bad(e) from e
+
+
+@router.post("/captures/{cid}/crop/reset")
+def reset_crop(cid: str) -> dict:
+    from ..services.cropping import crop
+    try:
+        return crop(cid, None)
+    except (ValueError, OSError) as e:
+        raise _bad(e) from e
+
+
 @router.get("/media/captures/{cid}/{variant}")
 def media(cid: str, variant: str) -> FileResponse:
-    if variant not in ("image", "thumb"):
+    if variant not in ("image", "thumb", "original"):
         raise HTTPException(404)
     with read_session() as s:
         c = s.get(Capture, cid)
         if c is None:
             raise HTTPException(404, "Not found")
-        rel = c.image_rel_path if variant == "image" else c.thumb_rel_path
+        rel = c.thumb_rel_path if variant == "thumb" else c.image_rel_path
+        if variant == "original":
+            from ..services.cropping import original_path
+            original = original_path(c)
+            if original.is_file():
+                rel = str(original.relative_to(paths().media)).replace("\\", "/")
     try:
         p = media_path(rel)
     except StorageError as e:
         raise HTTPException(404) from e
     if not p.is_file():
         raise HTTPException(404, "Screenshot file missing")
-    return FileResponse(p, media_type="image/png" if variant == "image" else "image/jpeg",
-                        headers={"Cache-Control": "private, max-age=86400"})
+    return FileResponse(p, media_type="image/jpeg" if variant == "thumb" else "image/png",
+                        headers={"Cache-Control": "no-store"})
 
 
 # ================================================================== transcript segments
@@ -874,8 +886,11 @@ def create_draft(body: DraftCreate) -> dict:
     if body.origin not in ("manual", "transcript"):
         raise HTTPException(400, "Invalid origin")
     try:
-        return rv.create_draft(body.project_id, body.session_id, body.type, body.title, body.description,
-                               body.segment_ids, body.note_ids, body.capture_ids, body.origin)
+        created = rv.create_draft(body.project_id, body.session_id, body.type, body.title, body.description,
+                                  body.segment_ids, body.note_ids, body.capture_ids, body.origin)
+        created["work_item_id"] = rv.approve([created["id"]])[0]["work_item_id"]
+        created["review_state"] = "approved"
+        return created
     except rv.ReviewError as e:
         raise _bad(e) from e
 
@@ -886,17 +901,7 @@ def approve(body: IdsIn) -> dict:
         out = {"approved": rv.approve(body.ids)}
     except rv.ReviewError as e:
         raise _bad(e) from e
-    _refresh_names(body.ids)
     return out
-
-
-def _refresh_names(draft_ids: list[str]) -> None:
-    from ..services.agents import refresh_name
-
-    with read_session() as s:
-        sids = {d.session_id for d in (s.get(DraftItem, i) for i in draft_ids) if d is not None}
-    for sid in sids:
-        refresh_name(sid)
 
 
 @router.post("/drafts/merge")
@@ -912,7 +917,6 @@ def draft_action(did: str, action: str) -> dict:
     try:
         if action in ("dismiss", "restore"):
             out = rv.dismiss(did) if action == "dismiss" else rv.restore(did)
-            _refresh_names([did])
             return out
     except rv.ReviewError as e:
         raise _bad(e) from e

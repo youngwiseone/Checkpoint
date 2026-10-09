@@ -63,13 +63,13 @@ def foreground_project(window=_LOOK_NOW) -> Optional[str]:  # noqa: ANN001
     """The project whose program is in the foreground. Pass the window seen when the shortcut was pressed:
     by the time a note is saved, Checkpoint's own popup has the focus."""
     try:
-        from .flow import project_for_window
+        from .appwatch import rule_matches
 
         if window is _LOOK_NOW:
             from ..capture.win32 import foreground_window
 
             window = foreground_window()
-        return project_for_window(window)
+        return next((r.project_id for r in get_settings().app_watch.rules if window and rule_matches(r, [window])), None)
     except Exception:  # noqa: BLE001 - inference is a convenience, never a reason to lose a capture
         return None
 
@@ -77,8 +77,7 @@ def foreground_project(window=_LOOK_NOW) -> Optional[str]:  # noqa: ANN001
 def default_project_id(window=_LOOK_NOW) -> str:  # noqa: ANN001
     """Captures outside a session go to the project whose program is in the foreground, else the last
     used project, else a created 'General' project."""
-    pid = foreground_project(window)
-    pid = pid or get_settings().last_project_id
+    pid = get_settings().last_project_id or foreground_project(window)
     with write_session() as s:
         if pid and s.get(Project, pid) is not None:
             return pid
@@ -127,15 +126,11 @@ class CaptureService:
             hooks.emit_toast("error", msg)
             return None
         settings = get_settings()
-        audio_ok = self.sessions.audio_functioning()
-        needs_note = (
-            ask_context
-            or settings.capture.always_ask_context
-            or bool(active and active.always_ask_context)
-            or not audio_ok
-        )
+        needs_note = ask_context
         try:
             cap = self._persist(g, taken_at, mono, "hotkey_context" if ask_context else "hotkey", "unfinished" if needs_note else "marker")
+            from .inbox import ensure_capture
+            ensure_capture(cap["id"])
         except Exception as e:  # noqa: BLE001
             log.exception("Saving screenshot failed")
             msg = f"The screenshot couldn't be saved: {e}"
@@ -160,7 +155,7 @@ class CaptureService:
                 notices.push("info", "Screenshot saved to Unfinished captures — add context from the app.", "capture")
         else:
             label = fmt_offset(cap["offset_ms"])
-            hint = f" · becomes a card once transcribed ({settings.hotkeys.review} to review)"
+            hint = " · double tap to add a note, hold to review"
             hooks.emit_toast("success" if not g.warnings else "warning",
                              g.warnings[0] if g.warnings else f"Screenshot saved at {label}{hint}", g.work_rect)
         hooks.emit_state()
@@ -240,6 +235,16 @@ class CaptureService:
                         kind="typed", taken_at=cap.taken_at, offset_ms=cap.offset_ms)
             s.add(note)
             s.flush()
+            from ..models import WorkItem
+            existing = s.scalars(select(EvidenceLink).where(EvidenceLink.capture_id == cap.id,
+                                                           EvidenceLink.work_item_id.is_not(None))).first()
+            if existing:
+                w = s.get(WorkItem, existing.work_item_id)
+                w.title, w.description, w.type = provisional_title(text), text, category or guess_type(text)
+                w.version += 1
+                s.add(EvidenceLink(work_item_id=w.id, note_id=note.id, confidence="direct", attached_by="user"))
+                cap.status, cap.needs_context = "saved", False
+                return {"work_item_id": w.id, "note_id": note.id}
             draft = DraftItem(project_id=cap.project_id, session_id=cap.session_id, origin="typed",
                               type=category or guess_type(text), title=provisional_title(text), description=text)
             s.add(draft)
@@ -250,6 +255,8 @@ class CaptureService:
             cap.needs_context = False
             result = {"draft_id": draft.id, "note_id": note.id}
         hooks.emit_state()
+        from .review import approve
+        result["work_item_id"] = approve([result["draft_id"]])[0]["work_item_id"]
         return result
 
     def quick_note(self, text: str, category: Optional[str] = None, *, mono: Optional[float] = None,
@@ -275,6 +282,8 @@ class CaptureService:
             s.flush()
             s.add(EvidenceLink(draft_id=draft.id, note_id=note.id, confidence="direct", attached_by="user"))
             result = {"draft_id": draft.id, "note_id": note.id, "offset_ms": offset}
+        from .review import approve
+        result["work_item_id"] = approve([result["draft_id"]])[0]["work_item_id"]
         hooks.emit_state()
         return result
 

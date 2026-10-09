@@ -6,7 +6,7 @@ import time
 from typing import Callable, Optional
 
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QFont, QGuiApplication, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtGui import QColor, QIcon, QFont, QGuiApplication, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -27,7 +27,7 @@ RADIUS = 18  # matches the feel of the overlay's cards
 def note_css(c: Colors) -> str:
     """The note window in the current theme: a night-blue card, or the light card look."""
     return f"""
-QWidget#root {{ background: {css(c.card)}; border: 1px solid {css(c.border)}; border-radius: {RADIUS}px; }}
+QWidget#root {{ background: {css(colors.alpha(c.card, 210))}; border: 1px solid {css(c.border)}; border-radius: {RADIUS}px; }}
 QLabel {{ color: {css(c.text)}; font-size: 15px; }}
 QLabel#muted {{ color: {css(c.muted)}; font-size: 13px; }}
 QLabel#title {{ font-size: 16px; font-weight: 600; }}
@@ -56,6 +56,35 @@ CATEGORIES = [("", "No category"), ("bug", "Bug"), ("improvement", "Improvement"
               ("task", "Task"), ("question", "Question"), ("note", "Note")]
 
 
+def popup_css(c: Colors) -> str:
+    return note_css(c) + f"""
+QWidget {{ color: {css(c.text)}; font-family: 'Segoe UI'; font-size: 14px; }}
+QDialog, QFrame#inbox {{ background: transparent; border: none; }}
+QTabWidget::pane, QListWidget, QFrame#activityCard, QFrame#controlPill {{ background: {css(colors.alpha(c.card, 205))}; color: {css(c.text)}; border: 1px solid {css(colors.alpha(c.focus, 75))}; border-radius: 16px; }}
+QTabWidget::pane {{ padding: 18px; }}
+QTabWidget::pane QWidget {{ background: transparent; }}
+QScrollArea {{ background: transparent; border: none; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QLabel {{ background: transparent; }}
+QLineEdit, QSpinBox, QPlainTextEdit {{ background: {css(colors.alpha(c.field, 210))}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 10px; padding: 9px; }}
+QComboBox, QPushButton {{ background: {css(colors.alpha(c.button, 205))}; }}
+QPushButton:hover {{ background: {css(colors.alpha(c.selected, 205))}; border-color: {css(c.focus)}; }}
+QPushButton:pressed {{ background: {css(c.selected)}; padding-top: 9px; padding-bottom: 5px; }}
+QListWidget::item {{ padding: 12px; border-bottom: 1px solid {css(c.border)}; }}
+QListWidget::item:selected {{ background: {css(c.selected)}; }}
+QScrollBar:vertical {{ width: 7px; background: transparent; margin: 3px; }}
+QScrollBar::handle:vertical {{ background: {css(c.border_strong)}; border-radius: 3px; min-height: 20px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+QCheckBox {{ color: {css(c.text)}; padding: 4px; }}
+QTabBar::tab {{ background: transparent; color: {css(c.muted)}; padding: 12px 16px; border-radius: 10px; margin: 3px; }}
+QTabBar::tab:selected {{ background: {css(c.selected)}; color: {css(c.text)}; }}
+QProgressBar {{ background: {css(c.field)}; border: 1px solid {css(c.border)}; border-radius: 5px; min-height: 10px; max-height: 10px; }}
+QProgressBar::chunk {{ background: {css(c.accent)}; border-radius: 5px; }}
+QPushButton:disabled {{ color: {css(c.faint)}; background: {css(c.surface)}; }}
+"""
+
+
 def logical_point_for_physical(x: int, y: int) -> QPoint:
     """Map a physical-pixel point (win32/mss) to Qt logical coordinates on mixed-DPI setups."""
     for screen in QGuiApplication.screens():
@@ -65,6 +94,22 @@ def logical_point_for_physical(x: int, y: int) -> QPoint:
         if nx <= x < nx + g.width() * dpr and ny <= y < ny + g.height() * dpr:
             return QPoint(int(nx + (x - nx) / dpr), int(ny + (y - ny) / dpr))
     return QPoint(x, y)
+
+
+def microphone_icon() -> QIcon:
+    pixmap = QPixmap(24, 24)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QColor(colors.current().text))
+    painter.setBrush(QColor(colors.current().text))
+    painter.drawRoundedRect(QRectF(9, 2, 6, 12), 3, 3)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawArc(QRectF(5, 5, 14, 13), 180 * 16, 180 * 16)
+    painter.drawLine(12, 18, 12, 22)
+    painter.drawLine(8, 22, 16, 22)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class NoteWindow(QWidget):
@@ -77,6 +122,9 @@ class NoteWindow(QWidget):
         self.on_save, self.on_keep, self.on_discard = on_save, on_keep, on_discard
         self.payload: dict = {}
         self._esc_armed = 0.0
+        self._dictation = None
+        self._dictation_save = False
+        self.dictation_timer = QTimer(self, interval=100, timeout=self._poll_dictation)
         self._theme = ""
         self._apply_theme()
         root = self.root = QWidget(self)
@@ -102,6 +150,14 @@ class NoteWindow(QWidget):
         self.text.setAccessibleName("What should we remember about this?")
         self.text.setMinimumHeight(110)
         self.prompt.setBuddy(self.text)
+        self.mic_btn = QPushButton("Dictate note")
+        self.mic_btn.setIcon(microphone_icon())
+        self.mic_btn.setAccessibleName("Dictate note using microphone")
+        self.mic_btn.setToolTip("Record a voice note with Whistle. Click again to stop; maximum 60 seconds.")
+        self.mic_btn.clicked.connect(self._toggle_dictation)
+        self.dictation_status = QLabel("")
+        self.dictation_status.setObjectName("muted")
+        self.dictation_status.setWordWrap(True)
         row = QHBoxLayout()
         self.category = QComboBox()
         self.category.setAccessibleName("Category (optional)")
@@ -125,6 +181,8 @@ class NoteWindow(QWidget):
         btns.addWidget(self.save_btn)
         for w in (self.heading, self.sub, self.thumb, self.prompt, self.text):
             lay.addWidget(w)
+        lay.addWidget(self.mic_btn)
+        lay.addWidget(self.dictation_status)
         lay.addLayout(row)
         lay.addWidget(self.error)
         lay.addLayout(btns)
@@ -145,7 +203,9 @@ class NoteWindow(QWidget):
             self.setStyleSheet(note_css(c))
 
     def open_for(self, payload: dict) -> None:
+        self._cancel_dictation()
         self._apply_theme()
+        self.mic_btn.setIcon(microphone_icon())
         self.payload = payload
         is_capture = bool(payload.get("id"))
         self.text.clear()
@@ -189,11 +249,77 @@ class NoteWindow(QWidget):
         self.move(max(area.left(), x), max(area.top(), y))
 
     def _close(self) -> None:
+        self._cancel_dictation()
         prev = self.payload.get("fg_hwnd") or 0
         self.hide()
         if prev:
             win32.restore_foreground(prev)
         self.payload = {}
+
+    def _toggle_dictation(self):
+        if self._dictation is not None:
+            self._dictation.stop()
+            self.mic_btn.setEnabled(False)
+            self.dictation_status.setText("Transcribing…")
+            return
+        from ..audio.dictation import NoteDictation
+        from ..settings_store import get_settings
+        from ..transcription.engine import model_installed
+        if not model_installed("whistle"):
+            self._show_error("Download Whistle in Settings → Transcript to dictate notes.")
+            return
+        self.error.hide()
+        self._dictation_save = False
+        self._dictation = NoteDictation(get_settings().audio.mic_device)
+        self.mic_btn.setText("Stop dictation")
+        self.dictation_status.setText("Opening microphone…")
+        self._dictation.start()
+        self.dictation_timer.start()
+        self._fit()
+
+    def _poll_dictation(self):
+        recording = self._dictation
+        if recording is None:
+            return
+        phase = recording.phase
+        if phase != "done":
+            self.dictation_status.setText({"starting": "Opening microphone…", "recording": "Listening… click Stop dictation when finished (up to 60 seconds).",
+                                           "transcribing": "Transcribing with Whistle…"}[phase])
+            if phase == "transcribing":
+                self.mic_btn.setEnabled(False)
+            return
+        save = self._dictation_save
+        self._dictation = None
+        self.dictation_timer.stop()
+        self.mic_btn.setEnabled(True)
+        self.mic_btn.setText("Dictate note")
+        self._dictation_save = False
+        if recording.error:
+            self.dictation_status.setText("")
+            self._show_error("Couldn't dictate: " + recording.error)
+            return
+        if not recording.text:
+            self.dictation_status.setText("No speech detected. Try again or type your note.")
+            return
+        # Append to the latest editor contents, preserving anything typed during recording.
+        cursor = self.text.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        cursor.insertText((" " if self.text.toPlainText() and not self.text.toPlainText()[-1].isspace() else "") + recording.text)
+        self.text.setTextCursor(cursor)
+        self.dictation_status.setText("Dictation added. Edit it or save your note.")
+        self._fit()
+        if save:
+            self._save()
+
+    def _cancel_dictation(self):
+        if self._dictation is not None:
+            self._dictation.cancel()
+        self._dictation = None
+        self._dictation_save = False
+        self.dictation_timer.stop()
+        self.mic_btn.setEnabled(True)
+        self.mic_btn.setText("Dictate note")
+        self.dictation_status.setText("")
 
     # ------------------------------------------------------------ actions
     def _fit(self) -> None:
@@ -210,6 +336,12 @@ class NoteWindow(QWidget):
         self._fit()
 
     def _save(self) -> None:
+        if self._dictation is not None:
+            self._dictation_save = True
+            self._dictation.stop()
+            self.mic_btn.setEnabled(False)
+            self.dictation_status.setText("Transcribing before saving…")
+            return
         text = self.text.toPlainText()
         if not text.strip():
             self._show_error("Write a short note first — or press Esc to keep the screenshot for later.")

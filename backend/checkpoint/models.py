@@ -63,7 +63,7 @@ class Base(DeclarativeBase):
 
 # Enumerations kept as plain strings (validated in the API layer).
 REVIEW_STATES = ("pending", "approved", "dismissed")
-WORK_STATUSES = ("open", "in_progress", "done", "wont_do")
+WORK_STATUSES = ("open", "in_progress", "done", "wont_do", "deleted")
 SHARING_STATES = ("local_only", "pending", "synced", "failed", "conflict")
 ITEM_TYPES = ("bug", "improvement", "idea", "task", "question", "note")
 

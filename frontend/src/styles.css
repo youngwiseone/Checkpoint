@@ -394,3 +394,11 @@ kbd {
 .swatch-preview.light .sp-btn { background: #4f7bff; }
 .swatch-radio { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border-strong); flex: none; }
 .theme-swatch.on .swatch-radio { border-color: var(--accent); background: radial-gradient(var(--accent) 0 3.5px, transparent 4px); }
+
+/* Evidence-first review, inspired by blurt's focus view. */
+.evidence-drawer { width: min(1040px, 100%); }
+.review-screenshot { margin: 0; }
+.review-screenshot > img { display: block; width: 100%; max-height: 52vh; object-fit: contain; background: var(--bg); border-radius: 10px; cursor: zoom-in; }
+.review-screenshot figcaption { margin-top: 8px; }
+.review-strip { display: flex; gap: 8px; overflow-x: auto; margin-top: 10px; }
+.review-strip img { width: 100px; height: 62px; object-fit: contain; }

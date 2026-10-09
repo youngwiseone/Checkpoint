@@ -20,7 +20,7 @@ from ..events import notices
 from ..models import AudioChunk, AudioSource, Project, Session, TranscriptionJob, TranscriptSegment
 from ..settings_store import get_settings
 from ..workers import HEAVY_LOCK, Worker
-from .engine import ModelMissing, WhisperEngine
+from .engine import ModelMissing, WhistleEngine
 
 log = logging.getLogger(__name__)
 SEG_NS = uuid.UUID("6f1d3c52-7d0e-4c3b-9a55-3e8a2b1f0c11")
@@ -36,10 +36,16 @@ def recover_jobs() -> int:
 
 
 def load_chunk_audio(chunk: AudioChunk):  # noqa: ANN201
-    from faster_whisper import decode_audio
+    import av
 
-    p = paths().audio / chunk.rel_path
-    return decode_audio(str(p), sampling_rate=16000)
+    resampler = av.AudioResampler(format="fltp", rate=16000)
+    frames = []
+    with av.open(str(paths().audio / chunk.rel_path)) as container:
+        for frame in container.decode(audio=0):
+            frames.extend(f.to_ndarray().mean(axis=0) for f in resampler.resample(frame))
+        frames.extend(f.to_ndarray().mean(axis=0) for f in resampler.resample(None))
+    return np.clip(np.concatenate(frames), -1.0, 1.0) if frames else np.empty(0, dtype=np.float32)
+
 
 
 class TranscriptionWorker(Worker):
@@ -48,7 +54,7 @@ class TranscriptionWorker(Worker):
 
     def __init__(self) -> None:
         super().__init__()
-        self.engine = WhisperEngine()
+        self.engine = WhistleEngine()
         self.current_job: Optional[str] = None
         self.job_started: Optional[float] = None
         self.job_audio_s: float = 0.0
@@ -133,7 +139,7 @@ class TranscriptionWorker(Worker):
                 try:
                     prev_audio = load_chunk_audio(prev)
                     n = int(st.overlap_seconds * 16000)
-                    tail = prev_audio[-n:]
+                    tail = prev_audio[-n:] if n > 0 else prev_audio[:0]
                     overlap = len(tail) / 16000
                     audio = np.concatenate([tail, audio])
                 except Exception:  # noqa: BLE001 - missing previous chunk just means no overlap
@@ -141,8 +147,8 @@ class TranscriptionWorker(Worker):
             prompt = None
             if glossary:
                 terms = ", ".join(t.strip() for t in glossary.replace("\n", ",").split(",") if t.strip())[:600]
-                prompt = f"Glossary: {terms}."
-            segs = self.engine.transcribe(audio, english_only=st.model.endswith(".en"), initial_prompt=prompt)
+                prompt = terms
+            segs = self.engine.transcribe(audio, english_only=False, initial_prompt=prompt)
             rows = []
             for i, seg in enumerate(segs):
                 mid = (seg["start"] + seg["end"]) / 2
@@ -193,7 +199,7 @@ def stalled_message(w: "TranscriptionWorker") -> Optional[str]:
     limit = max(180.0, w.job_audio_s * 15)
     if elapsed > limit:
         return (f"Transcription seems stuck: one audio block has been processing for {int(elapsed // 60)} min. "
-                "Your audio is safe. Quit and restart Checkpoint to retry; if it keeps happening, set Transcription > Device to CPU.")
+                "Your audio is safe. Quit and restart Checkpoint to retry; if it keeps happening, pause background transcription in Settings.")
     return None
 
 

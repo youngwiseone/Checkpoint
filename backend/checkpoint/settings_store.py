@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from .db import read_session, write_session
 from .models import Setting
 
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 4
 
 
 class HotkeySettings(BaseModel):
@@ -18,7 +18,7 @@ class HotkeySettings(BaseModel):
     capture_context: str = "Shift+F8"
     quick_note: str = "F9"
     start_session: str = "Ctrl+F8"  # start a session (the offered project, else the last one); press twice quickly to end
-    review: str = "Ctrl+F9"  # the keyboard-first review overlay
+    review: str = "F9"  # optional second key; holding capture also opens review
     switch_project: str = "Shift+F9"  # switch project, or set up a new one, and start a session there
 
 
@@ -42,10 +42,10 @@ class AudioPrefs(BaseModel):
 
 
 class TranscriptionSettings(BaseModel):
-    model: str = "base.en"
+    model: Literal["whistle"] = "whistle"
     device: Literal["cpu", "cuda"] = "cpu"
     compute_type: str = "int8"
-    default_mode: Literal["after", "live", "off"] = "after"
+    default_mode: Literal["after", "live", "off"] = "live"
     paused: bool = False
     cpu_threads: int = 2
     overlap_seconds: float = 1.5
@@ -85,7 +85,7 @@ class WatchRule(BaseModel):
 
 class AppWatchSettings(BaseModel):
     # When a project's program appears, offer to start a session for it (tray + toast, start with the hotkey).
-    enabled: bool = True
+    enabled: bool = False
     rules: list[WatchRule] = Field(default_factory=list)
 
 
@@ -129,6 +129,16 @@ def _upgrade(value: dict) -> dict:
         for k, old, new in (("threshold", 0.5, 0.7), ("cooldown_s", 15, 45), ("max_per_session", 40, 25)):
             if ac.get(k, old) == old:
                 ac[k] = new
+    if value.get("version", 1) < 3:
+        value.setdefault("auto_capture", {})["enabled"] = False
+        value.setdefault("ai", {})["enabled"] = False
+        value.setdefault("app_watch", {})["enabled"] = False
+        value.setdefault("capture", {})["always_ask_context"] = False
+        hk = value.setdefault("hotkeys", {})
+        if hk.get("review", "Ctrl+F9") == "Ctrl+F9":
+            hk["review"] = "F9"
+    if value.get("version", 1) < 4:
+        value.setdefault("transcription", {}).update(model="whistle", device="cpu")
     value["version"] = SETTINGS_VERSION
     return value
 

@@ -63,6 +63,8 @@ export function useSettings() {
 
 /** [current project, setter]. Demo and archived projects are only chosen explicitly. */
 export function useCurrentProject(): [Project | undefined, (id: string) => void] {
+  const qc = useQueryClient();
+  const toast = useToast();
   const id = useSyncExternalStore(useCallback((cb: () => void) => { listeners.add(cb); return () => listeners.delete(cb); }, []), () => chosen);
   const { data: projects } = useProjects();
   const { data: settings } = useSettings();
@@ -71,5 +73,11 @@ export function useCurrentProject(): [Project | undefined, (id: string) => void]
     ?? visible.find((p) => p.id === settings?.last_project_id)
     ?? visible.find((p) => !p.is_demo)
     ?? visible[0];
-  return [project, setCurrentProject];
+  const select = useCallback((next: string) => {
+    setCurrentProject(next);
+    void api.patch("/api/settings", { last_project_id: next }).then(() => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+    }).catch((e: Error) => toast("error", `Couldn't remember the capture project: ${e.message}`));
+  }, [qc, toast]);
+  return [project, select];
 }

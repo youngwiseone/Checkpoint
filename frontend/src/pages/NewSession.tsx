@@ -116,8 +116,6 @@ export default function NewSession() {
   const [loopLabel, setLoopLabel] = useState("Computer audio");
   const [target, setTarget] = useState("foreground");
   const [mode, setMode] = useState<"after" | "live">("after");
-  const [ai, setAi] = useState(false);
-  const [askAlways, setAskAlways] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -136,8 +134,6 @@ export default function NewSession() {
     setLoopDev(x.loopback.device ?? "");
     setLoopLabel(x.loopback.label || "Computer audio");
     setMode(x.transcription_mode === "live" ? "live" : "after");
-    setAi(x.ai_enabled);
-    setAskAlways(x.always_ask_context);
     setTarget(x.capture_target || "foreground");
     setLoaded(true);
   }, [setup.data, loaded]);
@@ -159,7 +155,7 @@ export default function NewSession() {
       if (resumeId) return api.post<{ session_id: string }>(`/api/sessions/${resumeId}/resume`, srcs);
       return api.post<{ session_id: string }>("/api/sessions", {
         project_id: projectId, title: title || null, purpose, checklist: checks, bring_in_item_ids: bringIn, ...srcs,
-        capture_target: target, transcription_mode: mic || loop ? mode : "off", ai_enabled: ai, always_ask_context: askAlways,
+        capture_target: target, transcription_mode: mic || loop ? mode : "off", ai_enabled: false, always_ask_context: false,
       });
     },
     onSuccess: () => {
@@ -175,7 +171,6 @@ export default function NewSession() {
     if (t) setChecks((c) => [...c, t]);
     setCheckText("");
   };
-  const aiAvailable = !!settings.data?.ai.enabled;
 
   if (state?.session.active) {
     return (
@@ -271,9 +266,7 @@ export default function NewSession() {
                 <span className="hint">{!mic && !loop ? "No audio selected." : mode === "after" ? "Recommended: nothing heavy runs while you work." : "Transcribes in the background during the session (uses CPU)."}</span>
               </div>
             </div>
-            <Toggle checked={askAlways} onChange={setAskAlways} label="Always ask for context on F8" hint="Otherwise, with audio recording, F8 just saves a marker and stays out of your way." />
-            <Toggle checked={ai && aiAvailable} disabled={!aiAvailable} onChange={setAi} label="Organise with local AI after the session"
-              hint={aiAvailable ? "Uses Ollama on this PC. Your screenshot notes become cards either way." : "Not configured — set it up in Settings → Local AI. Captures work fine without it."} />
+
           </div>
         )}
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import threading
+import time
 from ctypes import wintypes
 from typing import Callable, Optional
 
@@ -29,6 +30,8 @@ user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
 user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.PeekMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT, wintypes.UINT]
+user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+user32.GetAsyncKeyState.restype = ctypes.c_short
 
 NAMED_KEYS = {
     "insert": 0x2D, "ins": 0x2D, "delete": 0x2E, "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22,
@@ -76,13 +79,17 @@ class HotkeyThread:
         self._rebound = threading.Event()
         self.status: list[dict] = []
         self._ids: dict[int, str] = {}
+        self._keys: dict[int, int] = {}
+        self._stop = threading.Event()
 
     def start(self) -> None:
+        self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="hotkeys")
         self._thread.start()
         self._ready.wait(5)
 
     def stop(self) -> None:
+        self._stop.set()
         if self._tid:
             user32.PostThreadMessageW(self._tid, WM_QUIT, 0, 0)
         if self._thread:
@@ -103,6 +110,7 @@ class HotkeyThread:
         for hid in list(self._ids):
             user32.UnregisterHotKey(None, hid)
         self._ids.clear()
+        self._keys.clear()
         status = []
         seen: dict[tuple[int, int], str] = {}
         for i, (action, combo) in enumerate(self.bindings_provider().items(), start=1):
@@ -114,6 +122,7 @@ class HotkeyThread:
                 seen[(mods, vk)] = action
                 if user32.RegisterHotKey(None, i, mods | MOD_NOREPEAT, vk):
                     self._ids[i] = action
+                    self._keys[i] = vk
                     entry["registered"] = True
                 else:
                     err = ctypes.get_last_error()
@@ -137,7 +146,18 @@ class HotkeyThread:
                 action = self._ids.get(int(msg.wParam))
                 if action:
                     try:
-                        self.on_action(action)
+                        if action == "capture":
+                            from .gestures import resolve_press
+                            vk = self._keys[int(msg.wParam)]
+                            resolved = resolve_press(lambda: bool(user32.GetAsyncKeyState(vk) & 0x8000),
+                                                     self._stop.wait, time.monotonic, self._stop.is_set)
+                            if resolved:
+                                self.on_action(resolved)
+                            if resolved == "review":
+                                while user32.GetAsyncKeyState(vk) & 0x8000 and not self._stop.wait(.01):
+                                    pass
+                        else:
+                            self.on_action(action)
                     except Exception:  # noqa: BLE001
                         log.exception("Hotkey action failed")
             elif msg.message == WM_REBIND:

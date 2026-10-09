@@ -44,7 +44,7 @@ export const TYPE_LABEL: Record<ItemType, string> = {
   bug: "Bug", improvement: "Improvement", idea: "Idea", task: "Task", question: "Question", note: "Note",
 };
 export const TYPES: ItemType[] = ["bug", "improvement", "idea", "task", "question", "note"];
-export const WORK_LABEL: Record<WorkStatus, string> = { open: "Open", in_progress: "In progress", done: "Done", wont_do: "Won't do" };
+export const WORK_LABEL: Record<WorkStatus, string> = { open: "Open", in_progress: "In progress", done: "Done", wont_do: "Won't do", deleted: "Deleted" };
 export const WORK_STATUSES: WorkStatus[] = ["open", "in_progress", "done", "wont_do"];
 export const SHARE_LABEL: Record<SharingState, string> = {
   local_only: "Local only", pending: "Pending sync", synced: "Synced", failed: "Sync failed", conflict: "Conflict",
@@ -213,17 +213,19 @@ export function useAutosave<T>(save: (value: T) => Promise<unknown>, delay = 600
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = null;
     const v = pending.current;
-    if (v == null) return;
+    if (v == null) return true;
     pending.current = null;
     setState("saving");
     try {
       await saveRef.current(v);
       setState(pending.current == null ? "saved" : "saving");
       setError(null);
+      return true;
     } catch (e) {
       pending.current = pending.current ?? v;
       setState("error");
       setError((e as Error).message);
+      return false;
     }
   }, []);
 

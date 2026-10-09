@@ -193,7 +193,7 @@ def _ai_image(capture_id: str, folder: Path) -> Optional[Path]:
         src = media_path(c.image_rel_path)
     if not src.is_file():
         return None
-    out = folder / f"{capture_id}.jpg"
+    out = folder / f"{capture_id}_{c.sha256}.jpg"
     if out.is_file():
         return out
     img = Image.open(src).convert("RGB")

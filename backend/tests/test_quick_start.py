@@ -59,7 +59,7 @@ def test_offer_when_program_starts_and_quick_start_uses_it(app_env, monkeypatch)
 
     pid = _project()
     other = _project("Other")
-    update_settings({"last_project_id": other, "app_watch": {"rules": [{"project_id": pid, "kind": "exe", "match": "DodgeThis.exe"}]}})
+    update_settings({"last_project_id": other, "app_watch": {"enabled": True, "rules": [{"project_id": pid, "kind": "exe", "match": "DodgeThis.exe"}]}})
     sm = _manager(monkeypatch)
     windows = []
     w = AppWatcher(sm, lambda: windows)

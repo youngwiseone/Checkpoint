@@ -6,7 +6,6 @@ import { api } from "../api";
 import type { SessionDetail, SourceStatus, TimelineItem } from "../types";
 import { Banner, Meter, Modal, Toggle, fmtOffset, useToast, Lightbox } from "../components/ui";
 import Checklist from "../components/Checklist";
-import SessionFlow from "../components/SessionFlow";
 import RecordingChips, { type ChipState } from "../components/RecordingChips";
 import { useAppState, useSettings } from "../state";
 
@@ -132,7 +131,6 @@ export default function ActiveSession() {
     if (p.ask !== undefined) body.always_ask_context = p.ask;
     live.mutate(body);
   };
-  const aw = state!.workers.auto_capture;
 
   return (
     <div className="page wide">
@@ -152,26 +150,23 @@ export default function ActiveSession() {
         <button className="btn danger" onClick={() => setConfirmEnd(true)}><Square size={15} /> End session</button>
       </div>
 
-      {detail.data && !detail.data.is_demo && <SessionFlow sessionId={sid!} style={{ marginBottom: 20 }} />}
 
       <div className="card stack" style={{ marginBottom: 20 }}>
         <div className="row"><h3 className="grow">Recording</h3><span className="muted small">Changes apply immediately (also from the tray menu)</span></div>
         <RecordingChips v={chips} onChange={changeLive} aiAvailable={!!state?.ai_enabled} disabled={live.isPending} live />
-        {chips.auto && aw.state === "needs_live" && <span className="small" style={{ color: "var(--warn)" }}>Auto screenshots are waiting for a live transcript{sources.length ? "" : " — turn on an audio source"}.</span>}
-        {chips.auto && aw.state === "watching" && <span className="small text-2"><Sparkles size={13} style={{ verticalAlign: -2 }} /> Watching the transcript · {aw.count} auto screenshot{aw.count === 1 ? "" : "s"} so far{aw.error ? ` · ${aw.error}` : ""}</span>}
       </div>
 
       <div className="split split-session">
         <div className="stack-lg">
           <div className="card">
             <div className="card-head"><h3>Capture</h3>
-              <span className="kbd-hints"><span><kbd>F8</kbd> screenshot</span><span><kbd>Shift+F8</kbd> screenshot + note</span><span><kbd>F9</kbd> text note</span></span>
+              <span className="kbd-hints">Tap capture · double tap to add text · hold to review</span>
             </div>
             {!state!.desktop.available && <Banner kind="warn">Global hotkeys need the desktop helper. Launch Checkpoint with <code>start.cmd</code>.</Banner>}
             {state!.desktop.available && state!.desktop.hotkeys.ok === false && <Banner kind="warn">Shortcut problem: {state!.desktop.hotkeys.reason}. <Link to="/settings">Change shortcuts</Link></Banner>}
-            {s.paused && <Banner kind="warn">Paused: no audio is being recorded. Screenshots and notes still work{sources.length ? " — F8 will ask for a note while paused." : "."}</Banner>}
-            {!sources.length && <Banner kind="info">No audio selected — F8 will ask for a note.</Banner>}
-            {sources.length > 0 && !s.paused && !s.audio_functioning && <Banner kind="error">All audio sources have stopped. F8 will ask for a note until recording recovers.</Banner>}
+            {s.paused && <Banner kind="warn">Paused: no audio is being recorded. Screenshots and notes still work{sources.length ? " — double tap capture to add a note." : "."}</Banner>}
+            {!sources.length && <Banner kind="info">No audio selected. Double tap capture to add a note.</Banner>}
+            {sources.length > 0 && !s.paused && !s.audio_functioning && <Banner kind="error">All audio sources have stopped. Screenshots still work; double tap to add a note.</Banner>}
             {sources.length > 0 && (
               <div style={{ marginTop: 8 }}>
                 {sources.map((src) => <SourceRow key={src.source_id} s={src} onRetry={() => retry.mutate(src.kind)} />)}
@@ -236,7 +231,7 @@ export default function ActiveSession() {
             <button className="btn" onClick={() => setConfirmEnd(false)}>Keep going</button>
             <button className="btn danger-solid" onClick={() => { setConfirmEnd(false); action.mutate("end"); }}>End session</button>
           </>}>
-          <p>Recording stops immediately and everything captured is kept. Transcription{detail.data?.ai_enabled ? " and AI organisation" : ""} will run in the background afterwards.</p>
+          <p>Recording stops immediately and everything captured is kept. Transcription will run in the background afterwards.</p>
         </Modal>
       )}
       {zoom && <Lightbox src={zoom} onClose={() => setZoom(null)} />}

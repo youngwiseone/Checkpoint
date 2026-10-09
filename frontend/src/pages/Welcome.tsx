@@ -58,12 +58,12 @@ export default function Welcome() {
         </div>
         <p className="text-2">
           Start a session, press <kbd>F8</kbd> to grab a screenshot of what you're looking at, <kbd>F9</kbd> for a quick text note,
-          and review everything as tidy cards afterwards. Microphone, computer audio, transcription and local AI are all optional —
+          and review everything as tidy cards afterwards. Microphone, computer audio and transcription are all optional —
           screenshots and notes always work, offline, on this PC.
         </p>
         <div className="row wrap">
           <button className="btn primary lg" onClick={() => finish.mutate({})} disabled={finish.isPending}>
-            Start without AI <ArrowRight size={18} />
+            Get started <ArrowRight size={18} />
           </button>
           <button className="btn lg" onClick={() => finish.mutate({ settings: true })} disabled={finish.isPending}>
             <Sparkles size={17} /> Set up optional features

@@ -31,7 +31,7 @@ from sqlalchemy import JSON, DateTime, Integer, String, Text, create_engine, sel
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 ItemType = Literal["bug", "improvement", "idea", "task", "question", "note"]
-WorkStatus = Literal["open", "in_progress", "done", "wont_do"]
+WorkStatus = Literal["open", "in_progress", "done", "wont_do", "deleted"]
 ALLOWED_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 MAGIC = {"image/png": b"\x89PNG\r\n\x1a\n", "image/jpeg": b"\xff\xd8\xff", "image/webp": b"RIFF"}
 

@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderPlus, Mic, MonitorSpeaker, Play, Trash2, FlaskConical, ImageOff, AppWindow, SlidersHorizontal, GitBranch } from "lucide-react";
+import { FolderPlus, Mic, MonitorSpeaker, Play, Trash2, FlaskConical, ImageOff, AppWindow, SlidersHorizontal } from "lucide-react";
 import { api, qs } from "../api";
-import type { Capture, Project, SessionSetup, SessionSummary, Settings } from "../types";
-import { AutoStartRule, ProjectSetupModal } from "../components/ProjectSetup";
-import { Banner, Empty, Modal, Spinner, fmtDate, fmtDuration, fmtOffset, useToast } from "../components/ui";
+import type { Project, SessionSetup, SessionSummary, Settings } from "../types";
+import { Banner, Empty, Modal, Spinner, fmtDate, fmtDuration, useToast } from "../components/ui";
 import { useAppState, useCurrentProject, useSettings } from "../state";
-import { CaptureNoteModal } from "./SessionDetail";
 import ActiveSession from "./ActiveSession";
 import RecordingChips, { type ChipState } from "../components/RecordingChips";
 
@@ -17,8 +15,6 @@ export function ProjectModal({ project, onClose }: { project?: Project; onClose:
   const [glossary, setGlossary] = useState(project?.glossary ?? "");
   const qc = useQueryClient();
   const toast = useToast();
-  // After creating, or from the pencil: optional repo + agent setup step.
-  const [setup, setSetup] = useState<{ p: Project; isNew: boolean } | null>(null);
   const save = useMutation({
     mutationFn: () =>
       project
@@ -26,19 +22,16 @@ export function ProjectModal({ project, onClose }: { project?: Project; onClose:
         : api.post<Project>("/api/projects", { name, description, glossary }),
     onSuccess: (p) => {
       qc.invalidateQueries({ queryKey: ["projects"] });
-      if (!project && p?.id) setSetup({ p, isNew: true });
-      else onClose(p);
+      onClose(p);
     },
     onError: (e: Error) => toast("error", e.message),
   });
-  if (setup) return <ProjectSetupModal project={setup.p} isNew={setup.isNew} onClose={() => onClose(setup.isNew ? setup.p : undefined)} />;
   return (
     <Modal
       title={project ? "Project details" : "New project"}
       onClose={() => onClose()}
       footer={
         <>
-          {project && <button className="btn ghost" onClick={() => setSetup({ p: project, isNew: false })}><GitBranch size={15} /> Repo & agent setup…</button>}
           <span className="spacer" />
           <button className="btn" onClick={() => onClose()}>Cancel</button>
           <button className="btn primary" disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>{project ? "Save" : "Create project"}</button>
@@ -91,26 +84,6 @@ function SessionRow({ s }: { s: SessionSummary }) {
   );
 }
 
-function UnfinishedInbox({ projectId }: { projectId: string }) {
-  const q = useQuery({ queryKey: ["unfinished", projectId], queryFn: () => api.get<Capture[]>(`/api/captures/unfinished${qs({ project_id: projectId })}`) });
-  const [open, setOpen] = useState<Capture | null>(null);
-  if (!q.data?.length) return null;
-  return (
-    <div className="card">
-      <div className="card-head"><h3>Unfinished captures</h3><span className="muted small">Screenshots kept for later — add context or discard</span></div>
-      <div className="row wrap" style={{ gap: 12 }}>
-        {q.data.map((c) => (
-          <button key={c.id} className="btn ghost" style={{ padding: 6, flexDirection: "column", alignItems: "flex-start" }} onClick={() => setOpen(c)}>
-            <img src={c.thumb_url} className="thumb" alt={`Unfinished screenshot ${c.window_title}`} style={{ width: 160, height: 90 }} />
-            <span className="small muted">{fmtDate(c.taken_at)}{c.offset_ms != null ? ` · ${fmtOffset(c.offset_ms)}` : ""}</span>
-          </button>
-        ))}
-      </div>
-      {open && <CaptureNoteModal capture={open} onClose={() => setOpen(null)} />}
-    </div>
-  );
-}
-
 function QuickStart({ project, settings }: { project: Project; settings: Settings }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -120,13 +93,9 @@ function QuickStart({ project, settings }: { project: Project; settings: Setting
   useEffect(() => { if (setupQ.data) setSetup(setupQ.data); }, [setupQ.data]);
   const aiAvailable = settings.ai.enabled;
   const start = useMutation({
-    mutationFn: () => api.post<{ session_id: string }>("/api/sessions", { ...setup!, project_id: project.id, transcription_mode: setup!.mic.enabled || setup!.loopback.enabled ? setup!.transcription_mode : "off" }),
+    mutationFn: () => api.post<{ session_id: string }>("/api/sessions", { ...setup!, ai_enabled: false, always_ask_context: false, project_id: project.id, transcription_mode: setup!.mic.enabled || setup!.loopback.enabled ? setup!.transcription_mode : "off" }),
     onSuccess: () => qc.invalidateQueries(),
     onError: (e: Error) => toast("error", e.message),
-  });
-  const auto = useMutation({
-    mutationFn: (on: boolean) => api.patch("/api/settings", { auto_capture: { enabled: on } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
   });
   if (!setup) return <div className="card"><Spinner /></div>;
   const v: ChipState = {
@@ -134,16 +103,12 @@ function QuickStart({ project, settings }: { project: Project; settings: Setting
     live: setup.transcription_mode === "live", auto: settings.auto_capture.enabled, ai: setup.ai_enabled, ask: setup.always_ask_context,
   };
   const change = (p: Partial<ChipState>) => {
-    if (p.auto !== undefined) {
-      auto.mutate(p.auto);
-      if (p.auto && !v.live) p = { ...p, live: true };  // auto screenshots need the live transcript
-    }
     setSetup((s) => s && ({
       ...s,
       mic: p.mic !== undefined ? { ...s.mic, enabled: p.mic } : s.mic,
       loopback: p.loop !== undefined ? { ...s.loopback, enabled: p.loop } : s.loopback,
       transcription_mode: p.live !== undefined ? (p.live ? "live" : "after") : s.transcription_mode,
-      ai_enabled: p.ai ?? s.ai_enabled,
+      ai_enabled: false,
       always_ask_context: p.ask ?? s.always_ask_context,
     }));
   };
@@ -155,13 +120,11 @@ function QuickStart({ project, settings }: { project: Project; settings: Setting
           <div className="row"><h3 className="grow">Ready when you are</h3>
             <button className="btn sm ghost" onClick={() => nav(`/new${qs({ project: project.id })}`)}><SlidersHorizontal size={14} /> Devices, purpose & checklist…</button></div>
           <RecordingChips v={v} onChange={change} aiAvailable={aiAvailable} />
-          {v.auto && !(recording && v.live) && <span className="small" style={{ color: "var(--warn)" }}>Auto screenshots need recorded audio with a live transcript.</span>}
         </div>
-        <button className="btn primary lg" onClick={() => start.mutate()} disabled={start.isPending}><Play size={17} /> Start session</button>
+        <button className="btn primary lg" onClick={() => start.mutate()} disabled={start.isPending}><Play size={17} /> Start recording</button>
       </div>
       {recording && <p className="hint">Recording {[v.mic && (v.micLabel || "Me"), v.loop && (v.loopLabel || "Computer audio")].filter(Boolean).join(" and ")}. Tell everyone on the call. You can change any of this while the session runs.</p>}
       <hr className="divider" style={{ margin: "2px 0" }} />
-      <AutoStartRule project={project} settings={settings} />
     </div>
   );
 }
@@ -205,7 +168,6 @@ export default function Home() {
   if (!state || !settings) return <div className="page"><Spinner label="Loading…" /></div>;
 
   const offer = state.workers.app_watch?.offer;
-  const hk = settings.hotkeys.start_session;
 
   if (!project) {
     return (
@@ -229,7 +191,7 @@ export default function Home() {
       <div className="page-head">
         <div className="grow">
           <h1 className="truncate">{project.name}</h1>
-          <p>During a session: <kbd>{settings.hotkeys.capture}</kbd> screenshot · <kbd>{settings.hotkeys.capture_context}</kbd> screenshot + note · <kbd>{settings.hotkeys.quick_note}</kbd> text note · <kbd>{hk}</kbd> twice to end.</p>
+          <p><kbd>{settings.hotkeys.capture}</kbd> tap to capture · double tap to add text · hold to review. Screenshots work without starting a recording.</p>
         </div>
       </div>
 
@@ -240,7 +202,7 @@ export default function Home() {
               <button className="btn primary sm" onClick={() => quick.mutate(offer.project_id)} disabled={quick.isPending}><Play size={14} /> Start</button>
               <button className="btn sm ghost" onClick={() => dismissOffer.mutate()}>Not now</button>
             </div>}>
-            <p><b>{offer.program}</b> is running. Start a “{offer.project_name}” session? <span className="muted">(or press <kbd>{hk}</kbd>)</span></p>
+            <p><b>{offer.program}</b> is running. Start a “{offer.project_name}” session? <span className="muted"></span></p>
           </Banner>
         )}
 
@@ -263,7 +225,6 @@ export default function Home() {
           <QuickStart project={project} settings={settings} />
         )}
 
-        <UnfinishedInbox projectId={project.id} />
 
         <div className="card tight">
           <div className="row" style={{ padding: "4px 6px 6px" }}><span className="section-label grow" style={{ margin: 0 }}>Past sessions</span>

@@ -14,27 +14,25 @@ def main() -> int:
     warnings: list[str] = []
     if sys.version_info < (3, 11):
         errors.append(f"Python 3.11+ is required (found {sys.version.split()[0]}). Install Python 3.11 and re-run setup.ps1.")
-    for mod, why in (("fastapi", "web server"), ("sqlalchemy", "database"), ("alembic", "database migrations"),
+    for mod, why in (("sqlalchemy", "database"), ("alembic", "database migrations"),
                      ("PySide6.QtWidgets", "tray icon and note window"), ("mss", "screenshots"), ("PIL", "image encoding")):
         try:
             importlib.import_module(mod)
         except Exception as e:  # noqa: BLE001
             errors.append(f"Missing {mod} ({why}): {e}. Run setup.ps1 again.")
-    for mod, why in (("pyaudiowpatch", "microphone/computer audio recording"), ("faster_whisper", "local transcription"),
+    for mod, why in (("pyaudiowpatch", "microphone/computer audio recording"), ("needle", "Whistle local transcription"),
                      ("keyring", "saving the shared-workspace token")):
         try:
             importlib.import_module(mod)
         except Exception as e:  # noqa: BLE001
             warnings.append(f"{mod} unavailable — {why} will be disabled ({e.__class__.__name__}).")
     try:
-        from .config import FRONTEND_DIST, paths
+        from .config import paths
 
         p = paths()
         test = p.root / ".write-test"
         test.write_text("ok")
         test.unlink()
-        if not (FRONTEND_DIST / "index.html").is_file():
-            warnings.append("The interface isn't built (frontend/dist missing). Run setup.ps1 to build it.")
     except Exception as e:  # noqa: BLE001
         errors.append(f"The data folder isn't writable: {e}")
     if sys.platform != "win32":

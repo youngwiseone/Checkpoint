@@ -47,7 +47,7 @@ def evidence_payload(s, links: Iterable[EvidenceLink]) -> list[dict]:  # noqa: A
             if c is None:
                 continue
             out.append({**base, "kind": "capture", "capture_id": c.id, "offset_ms": c.offset_ms, "taken_at": _iso(c.taken_at),
-                        "thumb_url": f"/api/media/captures/{c.id}/thumb", "image_url": f"/api/media/captures/{c.id}/image",
+                        "thumb_url": f"/api/media/captures/{c.id}/thumb?v={c.sha256}", "image_url": f"/api/media/captures/{c.id}/image?v={c.sha256}",
                         "window_title": c.window_title, "width": c.width, "height": c.height, "reason": c.reason})
         elif link.segment_id:
             seg = s.get(TranscriptSegment, link.segment_id)
@@ -114,7 +114,8 @@ def work_item_dict(s, w: WorkItem, with_evidence: bool = False) -> dict:  # noqa
             ]
     else:
         first = next((l for l in links if l.capture_id), None)
-        out["thumb_url"] = f"/api/media/captures/{first.capture_id}/thumb" if first else None
+        capture = s.get(Capture, first.capture_id) if first else None
+        out["thumb_url"] = f"/api/media/captures/{capture.id}/thumb?v={capture.sha256}" if capture else None
     return out
 
 
@@ -425,6 +426,8 @@ def list_work_items(project_id: Optional[str] = None, q: str = "", types: list[s
             stmt = stmt.where(WorkItem.type.in_(types))
         if statuses:
             stmt = stmt.where(WorkItem.work_status.in_(statuses))
+        else:
+            stmt = stmt.where(WorkItem.work_status != "deleted")
         if session_id:
             stmt = stmt.where(WorkItem.session_id == session_id)
         if q:
