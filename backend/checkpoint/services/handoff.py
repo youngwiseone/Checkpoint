@@ -274,18 +274,10 @@ def bundle_for(h: Handoff) -> Bundle:
 
 
 def write_folder(item_ids: list[str], include_screenshots: bool, include_excerpts: bool) -> Path:
-    """For assistants without the connector: a folder with items.md + screenshots, opened in Explorer."""
-    from datetime import datetime
+    """Portable PNG-only folder, with each note visible beneath its screenshot."""
+    from .image_cards import write_folder as images_folder
 
-    b = build(item_ids, include_screenshots, include_excerpts)
-    folder = paths().exports / "ai" / datetime.now().strftime("copy-%Y%m%d-%H%M%S")
-    folder.mkdir(parents=True, exist_ok=True)
-    names: dict[str, str] = {}
-    for i, ((_cap, p), cid) in enumerate(zip(b.images, b.image_ids), start=1):
-        names[cid] = f"screenshot-{i}.jpg"
-        (folder / names[cid]).write_bytes(p.read_bytes())
-    md = items_markdown(b.items, names, "# Items from Checkpoint")
-    (folder / "items.md").write_text(md, encoding="utf-8")
+    folder = images_folder(item_ids, include_screenshots, include_excerpts)
     if os.name == "nt":
-        os.startfile(folder)  # noqa: S606 - opens our own export folder in Explorer
+        os.startfile(folder)
     return folder

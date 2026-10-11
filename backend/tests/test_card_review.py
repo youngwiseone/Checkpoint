@@ -54,14 +54,14 @@ def test_swipe_wheel_keys_and_click_with_bounded_navigation(app_env, monkeypatch
     QTest.mouseMove(deck, origin - QPoint(0, 90))
     QTest.mouseRelease(deck, Qt.MouseButton.LeftButton, pos=origin - QPoint(0, 90))
     assert panel.selected_id == ids[1]
-    assert get_work_item(ids[0])['work_status'] == 'done'
+    assert get_work_item(ids[-1])['work_status'] == 'done'
     assert expanded == []
     panel.refresh()  # Background polling must preserve the selected card.
     assert panel.selected_id == ids[1]
-    QTest.keyClick(deck, Qt.Key.Key_Down)
-    QTest.keyClick(deck, Qt.Key.Key_Down)
-    assert panel.selected_id == ids[-1]
-    event = QWheelEvent(QPointF(origin), QPointF(deck.mapToGlobal(origin)), QPoint(), QPoint(0, 120),
+    QTest.keyClick(deck, Qt.Key.Key_Left)
+    QTest.keyClick(deck, Qt.Key.Key_Left)
+    assert panel.selected_id == ids[0]
+    event = QWheelEvent(QPointF(origin), QPointF(deck.mapToGlobal(origin)), QPoint(), QPoint(0, -120),
                         Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.ScrollUpdate, False)
     app.sendEvent(deck, event)
     assert panel.selected_id == ids[1]
@@ -71,7 +71,7 @@ def test_swipe_wheel_keys_and_click_with_bounded_navigation(app_env, monkeypatch
     assert expanded == [ids[1]]
     QTest.keyClick(deck, Qt.Key.Key_Up)
     QTest.keyClick(deck, Qt.Key.Key_Up)
-    assert panel.selected_id == ids[1]
+    assert panel.selected_id == ids[0]
     panel.close()
 
 
@@ -158,7 +158,7 @@ def test_swipe_delete_trash_undo_and_real_back_cards(app_env):
     app.processEvents()
     first = panel.selected_id
     assert len(panel.deck.behind) == 2
-    assert all(item['id'] != first and item['title'].startswith('Real task') for item, _ in panel.deck.behind)
+    assert all(item['id'] != first and item['title'].startswith('Real task') for _, item, _ in panel.deck.behind)
     origin = panel.deck.card_rect().center().toPoint()
     # A short drag previews deletion but does not mutate the task.
     QTest.mousePress(panel.deck, Qt.MouseButton.LeftButton, pos=origin)

@@ -242,6 +242,8 @@ class CaptureService:
                 w = s.get(WorkItem, existing.work_item_id)
                 w.title, w.description, w.type = provisional_title(text), text, category or guess_type(text)
                 w.version += 1
+                w.human_updated_at = datetime.now(timezone.utc)
+                w.description_edited = True
                 s.add(EvidenceLink(work_item_id=w.id, note_id=note.id, confidence="direct", attached_by="user"))
                 cap.status, cap.needs_context = "saved", False
                 return {"work_item_id": w.id, "note_id": note.id}

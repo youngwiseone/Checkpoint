@@ -311,6 +311,8 @@ class WorkItem(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     duplicate_of_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # a repeat report, added as evidence
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    human_updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    description_edited: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
 

@@ -1,12 +1,12 @@
-"""A small animated review deck: wheel, vertical drag, touch and click to expand."""
+"""Floating image cards with a snapping carousel and axis-locked decisions."""
 import time
 
-from PySide6.QtCore import QEasingCurve, QEvent, QRect, QRectF, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import QFont, QPainter, QPainterPath, QPen, QPixmap, QTransform
+from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QFont, QTextLayout, QTextOption, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import QWidget
 
 from . import colors
-from .glass import paint_glass
+from ..services.review import visible_context
 
 
 class TaskDeck(QWidget):
@@ -19,34 +19,104 @@ class TaskDeck(QWidget):
         self.item = None
         self.image = QPixmap()
         self.count = 0
+        self.ordinal = 0
+        self.processing_message = ''
+        self.spinner_angle = 0
+        self.spinner = QTimer(self, interval=60, timeout=self._spin)
         self.behind = []
         self.swipe_threshold = 90
         self.offset = 0.0
+        self.horizontal_offset = 0.0
         self.hover = False
         self.press = None
         self.pointer = None
+        self.axis = None
+        self.pressed_card = 0
         self.wheel_delta = 0
         self.last_wheel = 0
         self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName('Task card. Swipe up to approve, down to delete, or click to expand.')
-        self.animation = QVariantAnimation(self)
-        self.animation.setDuration(260)
-        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.animation.valueChanged.connect(self._animate)
+        self.setAccessibleName('Capture carousel. Drag sideways to browse, up to mark done, down to delete, or click to edit.')
+        self.animation = self._animation(self._animate)
+        self.horizontal_animation = self._animation(self._animate_horizontal)
         self.setMinimumHeight(280)
 
-    def _animate(self, value):
-        if value is None:
-            return
-        self.offset = float(value)
+    def set_processing(self, message=''):
+        self.processing_message = message
+        if message and self.isVisible():
+            self.spinner.start()
+        else:
+            self.spinner.stop()
         self.update()
-        self._update_mask()
+
+    def _spin(self):
+        self.spinner_angle = (self.spinner_angle + 18) % 360
+        self.update()
+
+    def _loading_rect(self):
+        if not self.item:
+            return self._base_rect()
+        relatives = [entry[0] for entry in self.neighbors()]
+        slot = next((n for n in (1, -1, 2, -2) if n not in relatives), max([0] + relatives) + 1)
+        return self._neighbor_rect(slot)
+
+    def _paint_loading(self, painter):
+        rect = self._loading_rect()
+        painter.save()
+        painter.setPen(QPen(QColor(255, 255, 255, 65), 1))
+        painter.setBrush(QColor(18, 28, 44, 215))
+        painter.drawRoundedRect(rect, 24, 24)
+        content = rect.adjusted(18, 0, -18, 0)
+        if self.item:
+            # Keep the label inside the exposed portion of a side loading card.
+            occupied = [self.card_rect()] + [self._neighbor_rect(n) for n, _, _ in self.neighbors()]
+            for other in occupied:
+                if other.left() <= rect.left() <= other.right():
+                    content.setLeft(max(content.left(), other.right() + 14))
+                if other.left() <= rect.right() <= other.right():
+                    content.setRight(min(content.right(), other.left() - 14))
+        spinner = QRectF(content.center().x() - 18, rect.center().y() - 50, 36, 36)
+        painter.setPen(QPen(QColor('white'), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawArc(spinner, self.spinner_angle * 16, 260 * 16)
+        painter.setFont(QFont('Segoe UI', 11))
+        painter.drawText(QRectF(content.left(), rect.top() + rect.height() * .52, content.width(), rect.height() * .48 - 24),
+                         Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                         self.processing_message)
+        painter.restore()
+
+    def showEvent(self, event):
+        if self.processing_message:
+            self.spinner.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self.spinner.stop()
+        super().hideEvent(event)
+
+    def _animation(self, callback):
+        animation = QVariantAnimation(self)
+        animation.setDuration(260)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.valueChanged.connect(callback)
+        return animation
+
+    def _animate(self, value):
+        if value is not None:
+            self.offset = float(value)
+            self.update()
+            self._update_mask()
+
+    def _animate_horizontal(self, value):
+        if value is not None:
+            self.horizontal_offset = float(value)
+            self.update()
+            self._update_mask()
 
     def _update_mask(self):
-        callback = getattr(self.window(), "update_glass_mask", None)
+        callback = getattr(self.window(), 'update_glass_mask', None)
         if callback:
             callback()
 
@@ -56,135 +126,210 @@ class TaskDeck(QWidget):
         self.animation.setEndValue(0.0)
         self.animation.start()
 
-    def present(self, item, image, count, direction=0, behind=None):
+    def settle_horizontal(self, start=None):
+        self.horizontal_animation.stop()
+        self.horizontal_animation.setStartValue(self.horizontal_offset if start is None else start)
+        self.horizontal_animation.setEndValue(0.0)
+        self.horizontal_animation.start()
+
+    def present(self, item, image, count, direction=0, behind=None, ordinal=0):
         changed = (self.item or {}).get('id') != (item or {}).get('id')
         self.item, self.image, self.count = item, image, count
         self.behind = behind or []
-        self.setAccessibleDescription(
-            f"{item['title']}. {item.get('description', '')}" if item else 'No matching tasks. Add a note or capture a screenshot.')
-        if changed and direction:
-            self.settle(90.0 * direction)
+        self.ordinal = ordinal
+        self.setAccessibleDescription(f"{item['title']}. {item.get('description', '')}" if item else 'No matching captures.')
+        if changed:
+            self.animation.stop()
+            self.offset = 0.0
+            if direction:
+                # The selected neighbor starts exactly where it was during the drag.
+                self.settle_horizontal(self.horizontal_offset + direction * self.card_spacing())
+            else:
+                self.horizontal_animation.stop()
+                self.horizontal_offset = 0.0
         self.update()
 
+    def _title_layout(self):
+        width = min(560, max(120, self.width() - 70))
+        layout = QTextLayout((self.item or {}).get('title', ''), QFont('Segoe UI', 11, QFont.Weight.DemiBold))
+        option = QTextOption()
+        option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        option.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.setTextOption(option)
+        layout.beginLayout()
+        height = 0
+        while True:
+            line = layout.createLine()
+            if not line.isValid():
+                break
+            line.setLineWidth(width)
+            line.setPosition(QPointF(0, height))
+            height += line.height()
+        layout.endLayout()
+        return layout, width, max(24, height + 4)
+
+    def _title_size(self):
+        _, width, height = self._title_layout()
+        return width, height
+
+    def _base_rect(self):
+        _, title_height = self._title_size()
+        header = title_height + 38
+        height = max(120, min(540, self.height() - header - 42))
+        width = min(320, self.width() - 90, height * .64)
+        top = (self.height() - height - header - 34) / 2 + header
+        return QRectF((self.width() - width) / 2, top, width, height)
+
+    def focused_title_rect(self):
+        rect = self.card_rect()
+        width, height = self._title_size()
+        return QRectF(rect.center().x() - width / 2, rect.top() - height - 8, width, height)
+
+    def card_spacing(self):
+        return self._base_rect().width() * .76
+
     def card_rect(self):
-        width = min(300, self.width() - 100)
-        height = min(400, self.height() - 36)
-        return QRectF((self.width() - width) / 2, (self.height() - height) / 2 - 4 + self.offset, width, height)
+        return self._base_rect().translated(self.horizontal_offset, self.offset)
+
+    def neighbors(self):
+        for index, entry in enumerate(self.behind):
+            if len(entry) == 3:
+                yield entry
+            else:
+                yield index + 1, entry[0], entry[1]
+
+    def _neighbor_rect(self, relative):
+        rect = self._base_rect()
+        rect = rect.adjusted(0, rect.height() * .025, 0, -rect.height() * .025)
+        return rect.translated(relative * self.card_spacing() + self.horizontal_offset, 0)
 
     def back_cards(self):
-        rect = self.card_rect().translated(0, -self.offset)
-        for layer, (item, image) in reversed(list(enumerate(self.behind[:2]))):
-            dx, dy, angle = (-38, 9, -7) if layer == 0 else (38, 18, 7)
-            back = rect.translated(dx, dy)
-            transform = QTransform()
-            transform.translate(back.center().x(), back.center().y())
-            transform.rotate(angle)
-            transform.translate(-back.center().x(), -back.center().y())
-            yield back, transform, item, image
+        for relative, item, image in sorted(self.neighbors(), key=lambda entry: abs(entry[0]), reverse=True):
+            yield self._neighbor_rect(relative), QTransform(), item, image
 
     def surface_path(self):
         path = QPainterPath()
-        path.addRoundedRect(self.card_rect(), 24, 24)
-        for rect, transform, _, _ in self.back_cards():
-            back = QPainterPath()
-            back.addRoundedRect(rect, 24, 24)
-            path = path.united(transform.map(back))
+        if self.item:
+            path.addRoundedRect(self.card_rect(), 24, 24)
+            for rect, _, _, _ in self.back_cards():
+                path.addRoundedRect(rect, 24, 24)
         return path
 
     def paintEvent(self, event):
+        if not self.item and not self.processing_message:
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = colors.current()
+        if self.processing_message:
+            self._paint_loading(painter)
+        if not self.item:
+            painter.end()
+            return
+        # Draw the farthest cards first. Occlude their labels under the center label.
         rect = self.card_rect()
-        front_clip = QPainterPath()
-        front_clip.addRoundedRect(rect, 24, 24)
-        visible_backs = QPainterPath()
-        visible_backs.addRect(QRectF(self.rect()))
-        visible_backs = visible_backs.subtracted(front_clip)
-        for back, transform, item, image in self.back_cards():
+        clip = QPainterPath()
+        clip.addRect(QRectF(self.rect()))
+        front = QPainterPath()
+        front.addRoundedRect(rect, 24, 24)
+        title = self.focused_title_rect()
+        front.addRect(title.adjusted(-6, -26, 6, 8))
+        front.addRect(QRectF(rect.x() - 3, rect.bottom(), rect.width() + 6, 34))
+        for back, _, item, image in self.back_cards():
             painter.save()
-            painter.setClipPath(visible_backs)
-            painter.setTransform(transform, combine=True)
+            painter.setClipPath(clip.subtracted(front))
+            relative = next((n for n, candidate, _ in self.neighbors() if candidate['id'] == item['id']), 1)
+            painter.setOpacity(.32 if abs(relative) == 3 else .14 if abs(relative) >= 4 else 1)
             self._paint_card(painter, back, item, image, c, back=True)
             painter.restore()
         self._paint_card(painter, rect, self.item, self.image, c)
-        if self.press is not None and abs(self.offset) > 16 and self.item:
-            decision = 'APPROVE' if self.offset < 0 else 'DELETE'
+        if self.axis == 'vertical' and abs(self.offset) > 16:
+            decision = 'DONE' if self.offset < 0 else 'DELETED'
             tint = c.success if self.offset < 0 else c.danger
+            badge = QRectF(rect.center().x() - 68, rect.top() + 14, 136, 38)
             painter.setPen(QPen(tint, 2))
             painter.setBrush(colors.alpha(c.card, 240))
-            badge = QRectF(rect.center().x() - 68, rect.top() + 12, 136, 38)
             painter.drawRoundedRect(badge, 12, 12)
             painter.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, decision)
+        painter.setPen(QColor(255, 255, 255, 190))
+        painter.setFont(QFont('Segoe UI', 10))
+        if self.ordinal > 1:
+            painter.drawText(QRectF(10, rect.center().y() - 12, 90, 24), Qt.AlignmentFlag.AlignLeft, '\u2039 Older')
+        if self.ordinal and self.ordinal < self.count:
+            painter.drawText(QRectF(self.width() - 100, rect.center().y() - 12, 90, 24), Qt.AlignmentFlag.AlignRight, 'Newer \u203a')
         painter.end()
+
+    @staticmethod
+    def image_source_rect(image, target):
+        """Center crop only the painted preview, leaving the original pixmap intact."""
+        source = QRectF(image.rect())
+        ratio = target.width() / target.height()
+        if source.width() / source.height() > ratio:
+            width = source.height() * ratio
+            source.setX((image.width() - width) / 2)
+            source.setWidth(width)
+        else:
+            height = source.width() / ratio
+            source.setY((image.height() - height) / 2)
+            source.setHeight(height)
+        return source
 
     def _paint_card(self, painter, rect, item, image, c, back=False):
         painter.save()
-        # A diffuse local shadow, leaving the rest of the window completely clear.
-        for spread in (8, 5, 2):
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(colors.alpha(c.shadow, 10))
+        painter.setPen(Qt.PenStyle.NoPen)
+        for spread in (10, 6, 2):
+            painter.setBrush(QColor(0, 0, 0, 14))
             painter.drawRoundedRect(rect.adjusted(-spread, spread, spread, spread * 2), 24, 24)
-        paint_glass(painter, rect, c, radius=24, strength=1.03 if self.hover and not back else 1)
-        if self.pointer and rect.contains(self.pointer):
-            painter.setPen(QPen(colors.alpha(c.focus, 75), 2))
-            painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), 22, 22)
-        clip = QPainterPath()
-        clip.addRoundedRect(rect.adjusted(16, 16, -16, -16), 10, 10)
-        painter.setClipPath(clip)
-        inner = rect.adjusted(22, 22, -22, -22)
-        painter.setPen(c.text)
-        if not item:
-            painter.setFont(QFont('Segoe UI', 20, QFont.Weight.DemiBold))
-            painter.drawText(inner.adjusted(0, 65, 0, -170), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                             'Your next moment starts here')
-            painter.setFont(QFont('Segoe UI', 11))
-            painter.setPen(c.text_2)
-            painter.drawText(inner.adjusted(0, 160, 0, -55), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                             'Tap your capture key to save a screenshot, or add a note below.')
+        painter.setFont(QFont('Segoe UI', 11, QFont.Weight.DemiBold))
+        painter.setPen(QColor('white'))
+        if back:
+            heading = painter.fontMetrics().elidedText(item['title'], Qt.TextElideMode.ElideRight, int(rect.width()))
+            painter.drawText(QRectF(rect.x(), rect.y() - 31, rect.width(), 24), Qt.AlignmentFlag.AlignCenter, heading)
         else:
-            painter.setFont(QFont('Segoe UI', 10, QFont.Weight.DemiBold))
-            painter.setPen(c.focus if c.dark else c.accent)
-            badge = item.get('type', 'task').replace('_', ' ').title()
-            badge += '  ·  ' + item.get('work_status', 'open').replace('_', ' ').title()
-            painter.drawText(QRectF(inner.x(), inner.y(), inner.width(), 24), badge)
-            y = inner.y() + 32
-            if not image.isNull():
-                image_rect = QRectF(inner.x(), y, inner.width(), min(148, rect.height() * .36))
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(colors.alpha(c.bg, 120))
-                painter.drawRoundedRect(image_rect, 12, 12)
-                size = image.size().scaled(image_rect.size().toSize(), Qt.AspectRatioMode.KeepAspectRatio)
-                target = QRectF(image_rect.center().x() - size.width() / 2,
-                                image_rect.center().y() - size.height() / 2, size.width(), size.height())
-                painter.drawPixmap(target, image, QRectF(image.rect()))
-                y = image_rect.bottom() + 16
-            painter.setPen(c.text)
-            painter.setFont(QFont('Segoe UI', 16, QFont.Weight.DemiBold))
-            title_height = min(66, painter.fontMetrics().boundingRect(
-                QRect(0, 0, int(inner.width()), 1000), Qt.TextFlag.TextWordWrap, item['title']).height() + 2)
-            title_rect = QRectF(inner.x(), y, inner.width(), title_height)
-            painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
-                             item['title'])
-            y = title_rect.bottom() + 10
+            title = self.focused_title_rect()
+            layout, _, _ = self._title_layout()
+            layout.draw(painter, title.topLeft())
+            if self.ordinal:
+                painter.setFont(QFont('Segoe UI', 10))
+                painter.drawText(QRectF(title.x(), title.y() - 26, title.width(), 22), Qt.AlignmentFlag.AlignCenter,
+                                 f'{self.ordinal}/{self.count}')
+        painter.setFont(QFont('Segoe UI', 10))
+        painter.drawText(QRectF(rect.x(), rect.bottom() + 7, rect.width(), 23), Qt.AlignmentFlag.AlignCenter,
+                         'Click to focus' if back else 'Click to edit')
+        shape = QPainterPath()
+        shape.addRoundedRect(rect, 24, 24)
+        painter.setClipPath(shape)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(c.card)
+        painter.drawRect(rect)
+        if not image.isNull():
+            painter.drawPixmap(rect, image, self.image_source_rect(image, rect))
+        text = visible_context(item)
+        if text:
             painter.setFont(QFont('Segoe UI', 10))
-            painter.setPen(c.text_2)
-            text = item.get('description') or '\n'.join(e.get('text', '') for e in item.get('evidence', []) if e['kind'] != 'capture')
-            snippet = text[:240] + ('…' if len(text) > 240 else '')
-            painter.save()
-            line_height = painter.fontMetrics().lineSpacing()
-            available = max(0, rect.bottom() - 65 - y)
-            snippet_rect = QRectF(inner.x(), y, inner.width(), int(available // line_height) * line_height)
-            painter.setClipRect(snippet_rect)
-            painter.drawText(snippet_rect, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, snippet)
-            painter.restore()
-        painter.setPen(QPen(colors.alpha(c.text, 35), 1))
-        painter.drawLine(int(inner.left()), int(rect.bottom() - 52), int(inner.right()), int(rect.bottom() - 52))
-        painter.setPen(c.text_2)
-        painter.setFont(QFont('Segoe UI', 9))
-        painter.drawText(QRectF(inner.x(), rect.bottom() - 43, inner.width(), 26),
-                         Qt.AlignmentFlag.AlignCenter, '↑ Approve · ↓ Delete · Click to expand' if item else 'Screenshots and notes stay together')
+            inset = 16
+            width = rect.width() - inset * 2
+            line = painter.fontMetrics().lineSpacing()
+            expanded = not back and self.pointer is not None and rect.contains(self.pointer)
+            needed = painter.fontMetrics().boundingRect(QRect(0, 0, int(width), 10000), Qt.TextFlag.TextWordWrap, text).height()
+            limit = rect.height() * .55 if expanded else min(rect.height() * .35, line * 2 + inset * 2)
+            note_height = min(limit, needed + inset * 2)
+            if image.isNull():
+                note_height = min(rect.height(), max(note_height, rect.height() * .7))
+            panel = QRectF(rect.x(), rect.bottom() - note_height, rect.width(), note_height)
+            painter.setBrush(QColor(10, 18, 28, 190))
+            painter.drawRect(panel)
+            painter.setPen(QColor('white'))
+            lines = max(1, int((note_height - inset * 2) // line))
+            note = panel.adjusted(inset, inset, -inset, -inset)
+            if expanded or image.isNull():
+                painter.drawText(note, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, text)
+            else:
+                # A compact two-line excerpt; the complete note opens on hover/edit.
+                chars = max(24, int(width / painter.fontMetrics().averageCharWidth()) * lines)
+                snippet = text[:chars].rstrip() + ('…' if len(text) > chars else '')
+                painter.drawText(note, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, snippet)
         painter.restore()
 
     def enterEvent(self, event):
@@ -196,33 +341,76 @@ class TaskDeck(QWidget):
         self.pointer = None
         self.update()
 
+    def _hit_card(self, point):
+        if self.item and self.card_rect().adjusted(0, 0, 0, 32).contains(point):
+            return 0
+        # Paint order establishes which exposed card receives a click.
+        for relative, _, _ in sorted(self.neighbors(), key=lambda entry: abs(entry[0])):
+            if self._neighbor_rect(relative).adjusted(0, 0, 0, 32).contains(point):
+                return relative
+        return None
+
     def begin_drag(self, point):
         if self.press is not None:
             return
-        if not self.card_rect().contains(point):
+        hit = self._hit_card(point)
+        if hit is None:
             return
         self.setFocus()
         self.animation.stop()
-        self.offset = 0
+        self.horizontal_animation.stop()
+        self.offset = 0.0
+        self.drag_start_x = self.horizontal_offset
         self.press = point
+        self.pressed_card = hit
+        self.axis = None
 
     def drag_to(self, point):
         self.pointer = point
         if self.press is not None:
-            self.offset = max(-160.0, min(160.0, point.y() - self.press.y()))
+            delta = point - self.press
+            if self.axis is None and max(abs(delta.x()), abs(delta.y())) >= 10:
+                self.axis = 'horizontal' if abs(delta.x()) > abs(delta.y()) else 'vertical'
+            if self.axis == 'horizontal':
+                relatives = [0] + [entry[0] for entry in self.neighbors()]
+                spacing = self.card_spacing()
+                low, high = -max(relatives) * spacing, -min(relatives) * spacing
+                proposed = self.drag_start_x + delta.x()
+                # Elastic resistance at the first and last card.
+                self.horizontal_offset = max(low, min(high, proposed))
+                self.horizontal_offset += (proposed - self.horizontal_offset) * .22
+            elif self.axis == 'vertical' and self.pressed_card == 0:
+                self.offset = max(-200.0, min(200.0, delta.y()))
         self.update()
         self._update_mask()
 
     def end_drag(self, point):
         if self.press is None:
             return
+        self.drag_to(point)
         delta = point - self.press
+        axis = self.axis
         self.press = None
-        if self.item and abs(delta.y()) >= self.swipe_threshold and abs(delta.y()) > abs(delta.x()):
+        self.axis = None
+        if axis == 'horizontal':
+            relatives = [0] + [entry[0] for entry in self.neighbors()]
+            target = -self.horizontal_offset / self.card_spacing()
+            step = min(relatives, key=lambda relative: abs(relative - target))
+            if abs(delta.x()) >= max(42, self.card_spacing() * .25) and step:
+                self.navigate.emit(step)
+                self.settle_horizontal()
+            else:
+                self.settle_horizontal()
+        elif axis == 'vertical' and self.pressed_card == 0 and self.item and abs(delta.y()) >= self.swipe_threshold:
             self.decide.emit('done' if delta.y() < 0 else 'deleted')
         elif delta.manhattanLength() < 8 and self.item:
-            self.expand.emit()
+            if self.pressed_card:
+                self.navigate.emit(self.pressed_card)
+                self.settle_horizontal()
+            else:
+                self.expand.emit()
         self.settle()
+        self.update()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -240,7 +428,8 @@ class TaskDeck(QWidget):
         if now - self.last_wheel < .24:
             event.accept()
             return
-        self.wheel_delta += event.pixelDelta().y() if not event.pixelDelta().isNull() else event.angleDelta().y()
+        delta = event.pixelDelta() if not event.pixelDelta().isNull() else event.angleDelta()
+        self.wheel_delta += delta.y() if delta.y() else delta.x()
         if abs(self.wheel_delta) >= 60:
             self.navigate.emit(1 if self.wheel_delta < 0 else -1)
             self.wheel_delta = 0
@@ -248,8 +437,8 @@ class TaskDeck(QWidget):
         event.accept()
 
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
-            self.navigate.emit(1 if event.key() == Qt.Key.Key_Down else -1)
+        if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_Left, Qt.Key.Key_Right):
+            self.navigate.emit(1 if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Right) else -1)
         elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             if self.item:
                 self.expand.emit()
@@ -270,6 +459,8 @@ class TaskDeck(QWidget):
             return True
         if event.type() == QEvent.Type.TouchCancel:
             self.press = None
+            self.axis = None
             self.settle()
+            self.settle_horizontal()
             return True
         return super().event(event)

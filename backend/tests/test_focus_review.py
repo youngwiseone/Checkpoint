@@ -17,7 +17,7 @@ def test_review_navigation_done_archive_and_conflict_safe_undo(app_env):
     panel.toggle(pid)
     app.processEvents()
     selected = panel.selected_id
-    panel._step(1)
+    panel._step(-1)
     assert panel.selected_id != selected
     target = panel.selected_id
     panel._status("done")

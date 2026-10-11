@@ -203,9 +203,11 @@ def stalled_message(w: "TranscriptionWorker") -> Optional[str]:
     return None
 
 
-def transcription_status(session_id: Optional[str] = None) -> dict:
+def transcription_status(session_id: Optional[str] = None, *, project_id: Optional[str] = None) -> dict:
     with read_session() as s:
         q = select(TranscriptionJob.state)
+        if project_id:
+            q = q.join(Session, Session.id == TranscriptionJob.session_id).where(Session.project_id == project_id)
         if session_id:
             q = q.where(TranscriptionJob.session_id == session_id)
         states = s.scalars(q).all()

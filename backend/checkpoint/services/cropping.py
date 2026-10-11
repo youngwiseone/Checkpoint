@@ -4,7 +4,9 @@ import io
 from PIL import Image, ImageDraw
 
 from ..db import write_session
-from ..models import Capture, new_id
+from sqlalchemy import select
+
+from ..models import Capture, EvidenceLink, WorkItem, new_id, utcnow
 from ..storage import atomic_write_bytes, media_path, sha256_bytes
 
 
@@ -50,4 +52,9 @@ def crop(capture_id: str, box: tuple[int, int, int, int] | None, *, highlight: b
         atomic_write_bytes(media_path(thumb_rel), thumb.getvalue())
         c.image_rel_path, c.thumb_rel_path = image_rel, thumb_rel
         c.width, c.height, c.sha256 = width, height, sha256_bytes(png.getvalue())
+        linked_ids = s.scalars(select(EvidenceLink.work_item_id).where(EvidenceLink.capture_id == c.id, EvidenceLink.work_item_id.is_not(None))).all()
+        for iid in linked_ids:
+            item = s.get(WorkItem, iid)
+            if item is not None:
+                item.human_updated_at = utcnow()
         return {"id": c.id, "width": width, "height": height, "revision": revision}

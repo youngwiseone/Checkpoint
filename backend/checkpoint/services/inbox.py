@@ -40,7 +40,7 @@ def reconcile() -> None:
                     existing.add(seg.id)
                     added = True
             # Never overwrite a title/note the user has edited. Speech remains available as evidence.
-            if added and w.title.startswith("Screenshot · ") and not w.description:
+            if added and w.title.startswith("Screenshot · ") and not w.description and not w.description_edited:
                 said = " ".join((g.corrected_text or g.text).strip() for g in segments)
                 w.title, w.description, w.type = provisional_title(said), said, guess_type(said)
                 w.version += 1
@@ -57,7 +57,7 @@ def ensure_capture(capture_id: str) -> str:
             return link.work_item_id
         w = WorkItem(project_id=c.project_id, session_id=c.session_id, type="note",
                      title=f"Screenshot · {c.window_title or c.taken_at.strftime('%H:%M:%S')}"[:300],
-                     description="", work_status="open")
+                     description="", work_status="open", human_updated_at=c.taken_at)
         s.add(w)
         s.flush()
         s.add(EvidenceLink(work_item_id=w.id, capture_id=c.id, confidence="direct", attached_by="user"))
@@ -84,4 +84,6 @@ class InboxWorker(Worker):
         if signature != self.last_signature:
             reconcile()
             self.last_signature = signature
+        from .image_cards import refresh
+        refresh()
         return False

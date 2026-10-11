@@ -38,7 +38,9 @@ def capture_backdrop(widget):
 def surface_path(widget):
     path = QPainterPath()
     deck = getattr(widget, 'deck', None)
-    if deck:
+    if deck and getattr(widget, 'switcher_backdrop', False):
+        path.addRoundedRect(QRectF(widget.rect()).adjusted(10, 1, -10, -1), 28, 28)
+    elif deck:
         for child in widget.findChildren(QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly):
             if child.isHidden():
                 continue

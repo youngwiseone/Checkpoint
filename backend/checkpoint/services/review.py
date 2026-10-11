@@ -105,6 +105,8 @@ def work_item_dict(s, w: WorkItem, with_evidence: bool = False) -> dict:  # noqa
         sess = s.get(Session, w.session_id)
         out["session_title"] = sess.title if sess else None
     links = s.scalars(select(EvidenceLink).where(EvidenceLink.work_item_id == w.id)).all()
+    out["human_updated_at"] = _iso(w.human_updated_at)
+    out["description_edited"] = w.description_edited
     out["capture_count"] = sum(1 for l in links if l.capture_id)
     if with_evidence:
         out["evidence"] = evidence_payload(s, links)
@@ -170,6 +172,8 @@ def update_draft(draft_id: str, patch: dict[str, Any], expected_version: Optiona
             w = s.get(WorkItem, d.work_item_id)
             if w:
                 w.title, w.description, w.type = d.title, d.description, d.type
+                if "description" in patch:
+                    w.description_edited = True
                 _bump_work_item(s, w)
         s.flush()
         return draft_dict(s, d)
@@ -178,6 +182,7 @@ def update_draft(draft_id: str, patch: dict[str, Any], expected_version: Optiona
 def _bump_work_item(s, w: WorkItem, who: Optional[str] = None) -> None:  # noqa: ANN001
     w.version += 1
     w.updated_at = utcnow()
+    w.human_updated_at = w.updated_at
     if who:
         w.updated_by = who
     if w.sharing_state in ("synced", "failed", "pending", "conflict") and w.server_version is not None:
@@ -212,7 +217,8 @@ def approve(draft_ids: list[str]) -> list[dict]:
             w = s.get(WorkItem, d.work_item_id) if d.work_item_id else None
             if w is None:
                 w = WorkItem(project_id=d.project_id, session_id=d.session_id, type=d.type, title=d.title,
-                             description=d.description, work_status="open", created_by=who, updated_by=who)
+                             description=d.description, work_status="open", created_by=who, updated_by=who,
+                             human_updated_at=d.updated_at or d.created_at, description_edited=d.human_edited)
                 s.add(w)
                 s.flush()
                 d.work_item_id = w.id
@@ -428,12 +434,14 @@ def list_work_items(project_id: Optional[str] = None, q: str = "", types: list[s
             stmt = stmt.where(WorkItem.work_status.in_(statuses))
         else:
             stmt = stmt.where(WorkItem.work_status != "deleted")
-        if session_id:
+        if session_id == "__unrecorded__":
+            stmt = stmt.where(WorkItem.session_id.is_(None))
+        elif session_id:
             stmt = stmt.where(WorkItem.session_id == session_id)
         if q:
             like = f"%{q.strip()}%"
             stmt = stmt.where(or_(WorkItem.title.ilike(like), WorkItem.description.ilike(like)))
-        stmt = stmt.order_by(WorkItem.updated_at.desc())
+        stmt = stmt.order_by(WorkItem.human_updated_at.desc(), WorkItem.created_at.desc(), WorkItem.id.desc())
         return [work_item_dict(s, w) for w in s.scalars(stmt).all()]
 
 
@@ -476,6 +484,8 @@ def update_work_item(item_id: str, patch: dict[str, Any], expected_version: Opti
                 v = [str(t)[:40] for t in (v or [])][:20]
             if getattr(w, k) != v:
                 setattr(w, k, v)
+                if k == "description":
+                    w.description_edited = True
                 changed = True
         if changed:
             _bump_work_item(s, w, who)
@@ -630,3 +640,26 @@ def recap(session_id: str) -> dict:
                 "by_type": {t: sum(1 for d in drafts if d.type == t and d.review_state != "dismissed") for t in ITEM_TYPES},
             },
         }
+
+
+def visible_context(item: dict) -> str:
+    """Current editable note plus labeled linked speech; old typed evidence is history."""
+    parts = [item.get('description') or '']
+    evidence = item.get('excerpts', item.get('evidence', []))
+    for excerpt in evidence:
+        kind = excerpt.get('kind')
+        if kind == 'capture':
+            continue
+        if kind == 'note' and (item.get('description_edited') or item.get('description')):
+            continue
+        text = excerpt.get('text') or ''
+        if not text:
+            continue
+        label = 'Linked speech' if kind == 'segment' else 'Typed note'
+        source = excerpt.get('source') or excerpt.get('source_label')
+        if source:
+            label += f' · {source}'
+        if excerpt.get('role') == 'withdrawal':
+            label += ' (withdrawal)'
+        parts.append(f'{label}:\n{text}')
+    return '\n\n'.join(part for part in parts if part)
