@@ -55,20 +55,18 @@ def test_native_settings_save_and_invalid_keys(app_env, monkeypatch):
     dialog = settings_dialog(monkeypatch)
     dialog.project.setCurrentIndex(dialog.project.findData(pid))
     dialog.capture_key.setText("F7")
-    dialog.review_key.setText("")
     dialog.mic.setChecked(True)
-    dialog.theme.setCurrentIndex(dialog.theme.findData("light"))
     dialog._save()
     assert dialog.result() == QDialog.DialogCode.Accepted
     saved = get_settings()
     assert saved.hotkeys.capture == "F7" and saved.hotkeys.review == ""
-    assert saved.audio.mic_enabled and saved.appearance.theme == "light"
+    assert saved.audio.mic_enabled and saved.appearance.theme == "dark"
     assert saved.last_project_id == pid
     dialog.close()
     dialog = settings_dialog(monkeypatch)
-    dialog.review_key.setText("F7")
+    dialog.capture_key.setText("invalid-key")
     dialog._save()
-    assert "different keys" in dialog.message.text()
+    assert "Unknown key" in dialog.message.text()
     assert get_settings().hotkeys.review == ""
     dialog.close()
 

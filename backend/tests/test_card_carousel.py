@@ -155,3 +155,16 @@ def test_horizontal_trackpad_wheel_browses_without_decisions():
     assert navigated == [1]
     assert decisions == []
     widget.close()
+
+def test_endpoint_buttons_jump_without_editing_or_deciding():
+    app, widget = deck()
+    widget.present(widget.item, widget.image, 5, behind=widget.behind, ordinal=3)
+    jumps, edits, decisions = [], [], []
+    widget.jump.connect(jumps.append)
+    widget.expand.connect(lambda: edits.append(True))
+    widget.decide.connect(decisions.append)
+    widget.newest_button.click()
+    widget.oldest_button.click()
+    assert jumps == [True, False]
+    assert edits == decisions == []
+    widget.close()

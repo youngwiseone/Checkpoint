@@ -3,24 +3,31 @@ import time
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QTextLayout, QTextOption, QPainter, QPainterPath, QPen, QPixmap, QTransform
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QPushButton
 
 from . import colors
 from ..services.review import visible_context
 
 
 class TaskDeck(QWidget):
+    jump = Signal(bool)
     navigate = Signal(int)
     decide = Signal(str)
     expand = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.oldest_button = QPushButton('Oldest', self)
+        self.newest_button = QPushButton('Newest', self)
+        for button, newest in ((self.oldest_button, False), (self.newest_button, True)):
+            button.setFixedSize(84, 34)
+            button.clicked.connect(lambda checked=False, newest=newest: self.jump.emit(newest))
         self.item = None
         self.image = QPixmap()
         self.count = 0
         self.ordinal = 0
         self.processing_message = ''
+        self.preview_loading = False
         self.spinner_angle = 0
         self.spinner = QTimer(self, interval=60, timeout=self._spin)
         self.behind = []
@@ -137,6 +144,9 @@ class TaskDeck(QWidget):
         self.item, self.image, self.count = item, image, count
         self.behind = behind or []
         self.ordinal = ordinal
+        self.oldest_button.setEnabled(ordinal > 1)
+        self.newest_button.setEnabled(bool(ordinal and ordinal < count))
+        self._place_buttons()
         self.setAccessibleDescription(f"{item['title']}. {item.get('description', '')}" if item else 'No matching captures.')
         if changed:
             self.animation.stop()
@@ -254,11 +264,16 @@ class TaskDeck(QWidget):
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, decision)
         painter.setPen(QColor(255, 255, 255, 190))
         painter.setFont(QFont('Segoe UI', 10))
-        if self.ordinal > 1:
-            painter.drawText(QRectF(10, rect.center().y() - 12, 90, 24), Qt.AlignmentFlag.AlignLeft, '\u2039 Older')
-        if self.ordinal and self.ordinal < self.count:
-            painter.drawText(QRectF(self.width() - 100, rect.center().y() - 12, 90, 24), Qt.AlignmentFlag.AlignRight, 'Newer \u203a')
         painter.end()
+
+    def _place_buttons(self):
+        y = int(self._base_rect().center().y()) - 17
+        self.oldest_button.move(4, y)
+        self.newest_button.move(self.width() - 88, y)
+
+    def resizeEvent(self, event):
+        self._place_buttons()
+        super().resizeEvent(event)
 
     @staticmethod
     def image_source_rect(image, target):
@@ -305,6 +320,9 @@ class TaskDeck(QWidget):
         painter.drawRect(rect)
         if not image.isNull():
             painter.drawPixmap(rect, image, self.image_source_rect(image, rect))
+        elif self.preview_loading and any(e['kind'] == 'capture' for e in item.get('evidence', [])):
+            painter.setPen(QPen(c.text, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.drawArc(QRectF(rect.center().x() - 16, rect.center().y() - 16, 32, 32), self.spinner_angle * 16, 260 * 16)
         text = visible_context(item)
         if text:
             painter.setFont(QFont('Segoe UI', 10))
@@ -425,14 +443,16 @@ class TaskDeck(QWidget):
 
     def wheelEvent(self, event):
         now = time.monotonic()
-        if now - self.last_wheel < .24:
-            event.accept()
-            return
         delta = event.pixelDelta() if not event.pixelDelta().isNull() else event.angleDelta()
-        self.wheel_delta += delta.y() if delta.y() else delta.x()
-        if abs(self.wheel_delta) >= 60:
-            self.navigate.emit(1 if self.wheel_delta < 0 else -1)
+        if now - self.last_wheel > .3:
             self.wheel_delta = 0
+        self.last_wheel = now
+        self.wheel_delta += delta.y() if delta.y() else delta.x()
+        threshold = 40 if not event.pixelDelta().isNull() else 120
+        if abs(self.wheel_delta) >= threshold:
+            steps = int(self.wheel_delta / threshold)
+            self.wheel_delta -= steps * threshold
+            self.navigate.emit(-steps)
             self.last_wheel = now
         event.accept()
 

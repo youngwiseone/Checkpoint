@@ -58,13 +58,9 @@ class SettingsDialog(GlassDialog):
             button.clicked.connect(callback)
             project_actions.addWidget(button)
         general.addRow(project_actions)
-        self.theme = combo([("Night blue", "dark"), ("Light", "light")], st.appearance.theme)
-        general.addRow("Appearance", self.theme)
         self.capture_key = QLineEdit(st.hotkeys.capture)
-        self.review_key = QLineEdit(st.hotkeys.review)
         general.addRow("Capture key", self.capture_key)
-        general.addRow("Review key (optional)", self.review_key)
-        hint = QLabel("Tap: screenshot · Double tap: add text · Hold: review\nLeave review key empty to use one key.")
+        hint = QLabel("Tap: screenshot · Double tap: add text to screenshot · Hold: menu")
         hint.setWordWrap(True)
         general.addRow(hint)
         self.region = combo([("Active display", "foreground_monitor"), ("Active window", "foreground_window")], st.capture.region)
@@ -214,12 +210,12 @@ class SettingsDialog(GlassDialog):
         from .hotkeys import parse
         try:
             capture = self.capture_key.text().strip()
-            review = self.review_key.text().strip()
+            review = ""
             capture_binding = parse(capture)
             if review and parse(review) == capture_binding:
                 raise ValueError("Capture and review must use different keys. Leave review empty to use only one key.")
             update_settings({"last_project_id": self.project.currentData(), "first_run_complete": True,
-                             "appearance": {"theme": self.theme.currentData()},
+                             "appearance": {"theme": "dark"},
                              "hotkeys": {"capture": capture, "review": review},
                              "capture": {"region": self.region.currentData()},
                              "audio": {"mic_enabled": self.mic.isChecked(), "mic_device": self.mic_device.currentData(),

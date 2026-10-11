@@ -32,6 +32,8 @@ def test_inline_project_reuses_settings_and_case_insensitive_name(app_env):
     assert fresh != pid and panel.project_picker.currentText() == 'Fresh project'
     saved = get_settings()
     assert saved.last_project_id == fresh and saved.audio.mic_enabled and saved.hotkeys.capture == 'F7'
+    assert not panel.project_picker.isEditable()
+    panel.project_picker.setCurrentIndex(panel.project_picker.findData('__new__'))
     panel.project_picker.setEditText('FRESH PROJECT')
     panel._commit_project()
     assert panel.project_id == fresh
@@ -191,3 +193,34 @@ def test_chronological_carousel_numbers_and_restart_position(app_env):
     assert restored.selected_id == ids[-1] and restored.deck.ordinal == 54
     panel.close()
     restored.close()
+
+
+def test_project_picker_switches_by_default_and_double_click_renames(app_env, monkeypatch):
+    app = application()
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from checkpoint.desktop import inbox
+    from checkpoint.services.capture import default_project_id
+    from checkpoint.db import read_session
+    from checkpoint.models import Project
+    pid = default_project_id()
+    panel = inbox.InboxPanel()
+    panel.toggle(pid)
+    picker = panel.project_picker
+    assert not picker.isEditable() and picker.height() >= 48
+    old_name = picker.currentText()
+    panel._commit_project()
+    assert picker.currentText() == old_name
+    requested = []
+    monkeypatch.setattr(inbox, 'get_text', lambda *args: requested.append(args) or ('Renamed project', True))
+    QTest.mouseClick(picker, Qt.MouseButton.LeftButton)
+    assert picker.view().isVisible()
+    assert not requested
+    picker.hidePopup()
+    QTest.mouseDClick(picker, Qt.MouseButton.LeftButton)
+    assert len(requested) == 1
+    assert picker.currentText() == 'Renamed project'
+    assert panel.project_id == pid and not picker.isEditable()
+    with read_session() as session:
+        assert session.get(Project, pid).name == 'Renamed project'
+    panel.close()

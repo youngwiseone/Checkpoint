@@ -1,8 +1,10 @@
 """A floating screenshot switcher with inline project creation and gesture review."""
 import math
+from concurrent.futures import ThreadPoolExecutor
+from collections import OrderedDict
 from sqlalchemy import select
-from PySide6.QtCore import Qt, QTimer, QUrl, QPointF
-from PySide6.QtGui import QPixmap, QPainter, QIcon, QPen, QPolygonF, QDesktopServices, QGuiApplication
+from PySide6.QtCore import Qt, QTimer, QUrl, QPointF, Signal, QSize
+from PySide6.QtGui import QImage, QImageReader, QPixmap, QPainter, QIcon, QPen, QPolygonF, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
                               QProgressBar, QPushButton, QVBoxLayout, QMenu)
 
@@ -12,7 +14,7 @@ from ..models import Capture, Project, Session, Setting
 from ..storage import media_path
 from . import colors
 from .windows import popup_css
-from .glass import center_on_screen, GlassDialog
+from .glass import center_on_screen, GlassDialog, get_text
 from .cards import TaskDeck
 from .backdrop import capture_backdrop, paint_backdrop
 
@@ -38,7 +40,20 @@ def control_icon(kind):
     return QIcon(image)
 
 
+class ProjectPicker(QComboBox):
+    rename_requested = Signal()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and not self.isEditable():
+            self.hidePopup()
+            self.rename_requested.emit()
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
+
+
 class InboxPanel(QFrame):
+    preview_ready = Signal(object, QImage)
     def __init__(self, open_ui=None, open_settings=None, recording=None, recording_status=None, processing_status=None):
         super().__init__()
         self.open_ui, self.open_settings, self.recording = open_ui, open_settings, recording
@@ -49,7 +64,12 @@ class InboxPanel(QFrame):
         self.frame_index = 0
         self.items = []
         self._direction = 0
-        self._back_previews = {}
+        self._back_previews = OrderedDict()
+        self._details = {}
+        self._capture_paths = {}
+        self._preview_pending = set()
+        self._preview_workers = ThreadPoolExecutor(max_workers=2, thread_name_prefix='previews')
+        self.preview_ready.connect(self._preview_loaded)
         self._session_signature = None
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -62,14 +82,14 @@ class InboxPanel(QFrame):
 
         header = QHBoxLayout()
         header.setSpacing(8)
-        self.project_picker = QComboBox()
-        self.project_picker.setEditable(True)
+        self.project_picker = ProjectPicker()
+        self.project_picker.setMinimumHeight(48)
+        self.project_picker.setStyleSheet('QComboBox { padding: 10px 16px; font-size: 18px; font-weight: 600; } QComboBox::drop-down { width: 40px; }')
         self.project_picker.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.project_picker.setAccessibleName('Project. Type a name and press Enter to create.')
-        self.project_picker.setToolTip('Choose a project, or type a new name and press Enter')
-        self.project_picker.lineEdit().setMaxLength(200)
+        self.project_picker.setAccessibleName('Choose project. Double-click to rename.')
+        self.project_picker.setToolTip('Click to switch projects. Double-click to rename the current project.')
         self.project_picker.currentIndexChanged.connect(self._project_changed)
-        self.project_picker.lineEdit().returnPressed.connect(self._commit_project)
+        self.project_picker.rename_requested.connect(self._rename_project)
         header.addWidget(self.project_picker, 1)
         self.settings_button = QPushButton()
         self.close_button = QPushButton()
@@ -110,6 +130,7 @@ class InboxPanel(QFrame):
 
         self.deck = TaskDeck(self)
         self.deck.navigate.connect(self._step)
+        self.deck.jump.connect(self._jump)
         self.deck.decide.connect(self._status)
         self.deck.expand.connect(lambda: self._open(self.selected_id))
         self.deck.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -215,10 +236,14 @@ class InboxPanel(QFrame):
     def _project_changed(self):
         pid = self.project_picker.currentData()
         if pid == '__new__':
+            self.project_picker.setEditable(True)
+            self.project_picker.lineEdit().setMaxLength(200)
+            self.project_picker.lineEdit().returnPressed.connect(self._commit_project)
             self.project_picker.setEditText('')
             self.project_picker.lineEdit().setPlaceholderText('New project name')
             self.project_picker.lineEdit().setFocus()
             return
+        self.project_picker.setEditable(False)
         if not pid:
             return
         from ..settings_store import update_settings
@@ -233,6 +258,8 @@ class InboxPanel(QFrame):
         self.refresh()
 
     def _commit_project(self):
+        if not self.project_picker.isEditable() or self.project_picker.currentData() != '__new__':
+            return
         name = self.project_picker.currentText().strip()
         if not name or name == 'New project…':
             return
@@ -247,8 +274,21 @@ class InboxPanel(QFrame):
         self.project_id = pid
         self._load_projects()
         self._project_changed()
-        self.project_picker.lineEdit().clearFocus()
+        self.project_picker.setEditable(False)
         self.deck.setFocus()
+
+    def _rename_project(self):
+        pid = self.project_picker.currentData()
+        if not pid or pid == '__new__':
+            return
+        name, accepted = get_text(self, 'Rename project', 'Project name', self.project_picker.currentText())
+        if not accepted or not name.strip():
+            return
+        with write_session() as session:
+            project = session.get(Project, pid)
+            if project:
+                project.name = name.strip()[:200]
+        self._load_projects()
 
     def _load_sessions(self):
         with read_session() as session:
@@ -315,9 +355,12 @@ class InboxPanel(QFrame):
         evidence = next((e for e in item.get('evidence', []) if e['kind'] == 'capture'), None)
         if not evidence:
             return QPixmap()
-        with read_session() as session:
-            capture = session.get(Capture, evidence['capture_id'])
-            path = media_path(capture.image_rel_path) if capture else None
+        cid = evidence['capture_id']
+        if cid not in self._capture_paths:
+            with read_session() as session:
+                capture = session.get(Capture, cid)
+                self._capture_paths[cid] = media_path(capture.image_rel_path) if capture else None
+        path = self._capture_paths[cid]
         if not path:
             return QPixmap()
         try:
@@ -325,9 +368,34 @@ class InboxPanel(QFrame):
         except OSError:
             return QPixmap()
         key = (str(path), stat.st_mtime_ns, stat.st_size)
-        if key not in self._back_previews:
-            self._back_previews[key] = QPixmap(str(path))
-        return self._back_previews[key]
+        if key in self._back_previews:
+            self._back_previews.move_to_end(key)
+            return self._back_previews[key]
+        if key not in self._preview_pending:
+            self._preview_pending.add(key)
+            self._preview_workers.submit(self._load_preview, key)
+        return QPixmap()
+
+    def _load_preview(self, key):
+        reader = QImageReader(key[0])
+        size = reader.size()
+        if size.isValid():
+            reader.setScaledSize(size.scaled(QSize(640, 640), Qt.AspectRatioMode.KeepAspectRatio))
+        self.preview_ready.emit(key, reader.read())
+
+    def _preview_loaded(self, key, image):
+        self._preview_pending.discard(key)
+        self._back_previews[key] = QPixmap.fromImage(image)
+        while len(self._back_previews) > 64:
+            self._back_previews.popitem(last=False)
+        if self.deck.press is None:
+            self._present()
+
+    def _detail(self, summary):
+        key = (summary['id'], summary['version'])
+        if key not in self._details:
+            self._details[key] = get_work_item(summary['id'])
+        return self._details[key]
 
     def refresh(self):
         if not self.isVisible() and self.timer.isActive():
@@ -336,6 +404,7 @@ class InboxPanel(QFrame):
         # Polling must not interrupt a swipe or replace the card under the pointer.
         if self.deck.press is not None:
             return
+        self._capture_paths.clear()
         previous_ids = [item['id'] for item in self.items]
         previous_index = previous_ids.index(self.selected_id) if self.selected_id in previous_ids else 0
         self._load_sessions()
@@ -371,18 +440,31 @@ class InboxPanel(QFrame):
             self.frame_index = 0
         index = ids.index(self.selected_id) if ids else 0
         self.position.setText(f'{len(ids)} cards' if ids else '')
-        item = get_work_item(self.selected_id) if ids else None
+        valid = {(item['id'], item['version']) for item in self.items}
+        self._details = {key: value for key, value in self._details.items() if key in valid}
+        self._present()
+
+    def _present(self):
+        ids = [item['id'] for item in self.items]
+        index = ids.index(self.selected_id) if self.selected_id in ids else 0
+        item = self._detail(self.items[index]) if ids else None
         behind = []
         for relative in (-4, -3, -2, -1, 1, 2, 3, 4):
             neighbour = index + relative
             if 0 <= neighbour < len(self.items):
-                full = get_work_item(self.items[neighbour]['id'])
+                full = self._detail(self.items[neighbour])
                 behind.append((relative, full, self._pixmap(full)))
         self.deck.present(item, self._pixmap(item) if item else QPixmap(), len(ids), self._direction, behind, ordinal=index + 1 if ids else 0)
         self._direction = 0
-        if len(self._back_previews) > 24:
-            self._back_previews.clear()
+        self.deck.preview_loading = bool(self._preview_pending)
+        if self.deck.preview_loading and self.deck.isVisible():
+            self.deck.spinner.start()
+        elif not self.deck.processing_message:
+            self.deck.spinner.stop()
         self.update_glass_mask()
+        # Warm a wider window of small previews for sustained wheel/drag browsing.
+        for neighbour in range(max(0, index - 12), min(len(self.items), index + 13)):
+            self._pixmap(self._detail(self.items[neighbour]))
 
     def _position_key(self):
         return f"{self.project_id}:{self.status_picker.currentData()}:{self.session_picker.currentData()}"
@@ -471,7 +553,15 @@ class InboxPanel(QFrame):
         self._direction = target - index
         self.selected_id = self.items[target]['id']
         self.frame_index = 0
-        self.refresh()
+        self._present()
+        self._remember_selection()
+
+    def _jump(self, newest):
+        if not self.items:
+            return
+        self.selected_id = self.items[-1 if newest else 0]['id']
+        self._direction = 0
+        self._present()
         self._remember_selection()
 
     def _status(self, value):

@@ -63,6 +63,11 @@ QDialog, QFrame#inbox {{ background: transparent; border: none; }}
 QTabWidget::pane, QListWidget, QFrame#activityCard, QFrame#controlPill {{ background: {css(colors.alpha(c.card, 205))}; color: {css(c.text)}; border: 1px solid {css(colors.alpha(c.focus, 75))}; border-radius: 16px; }}
 QTabWidget::pane {{ padding: 18px; }}
 QTabWidget::pane QWidget {{ background: transparent; }}
+QAbstractItemView, QComboBox QAbstractItemView, QTabWidget::pane QAbstractItemView {{ background: {css(c.surface_2)}; color: {css(c.text)}; alternate-background-color: {css(c.card)}; selection-background-color: {css(c.accent)}; selection-color: {css(c.on_accent)}; }}
+QAbstractItemView::item:selected {{ background: {css(c.accent)}; color: {css(c.on_accent)}; }}
+QHeaderView::section {{ background: {css(c.surface_3)}; color: {css(c.text)}; padding: 6px; border: none; }}
+QMenu {{ background: {css(c.surface_2)}; color: {css(c.text)}; }}
+QMenu::item:selected {{ background: {css(c.accent)}; color: {css(c.on_accent)}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QLabel {{ background: transparent; }}

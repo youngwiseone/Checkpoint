@@ -10,15 +10,15 @@ from pydantic import BaseModel, Field
 from .db import read_session, write_session
 from .models import Setting
 
-SETTINGS_VERSION = 4
+SETTINGS_VERSION = 5
 
 
 class HotkeySettings(BaseModel):
-    capture: str = "F8"
+    capture: str = "F9"
     capture_context: str = "Shift+F8"
     quick_note: str = "F9"
     start_session: str = "Ctrl+F8"  # start a session (the offered project, else the last one); press twice quickly to end
-    review: str = "F9"  # optional second key; holding capture also opens review
+    review: str = ""  # holding capture opens review
     switch_project: str = "Shift+F9"  # switch project, or set up a new one, and start a session there
 
 
@@ -139,6 +139,12 @@ def _upgrade(value: dict) -> dict:
             hk["review"] = "F9"
     if value.get("version", 1) < 4:
         value.setdefault("transcription", {}).update(model="whistle", device="cpu")
+    if value.get("version", 1) < 5:
+        hk = value.setdefault("hotkeys", {})
+        if hk.get("capture", "F8") == "F8":
+            hk["capture"] = "F9"
+        hk["review"] = ""
+        value.setdefault("appearance", {})["theme"] = "dark"
     value["version"] = SETTINGS_VERSION
     return value
 

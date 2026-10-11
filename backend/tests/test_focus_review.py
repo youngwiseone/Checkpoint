@@ -99,5 +99,11 @@ def test_focus_panel_loads_screenshot(app_env):
     panel.toggle(default_project_id())
     app.processEvents()
     assert panel.selected_id == wid
+    from PySide6.QtTest import QTest
+    for _ in range(100):
+        if not panel.deck.image.isNull():
+            break
+        QTest.qWait(10)
     assert not panel.deck.image.isNull()
+    assert max(panel.deck.image.width(), panel.deck.image.height()) <= 640
     panel.close()

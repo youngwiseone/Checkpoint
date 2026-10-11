@@ -247,18 +247,24 @@ class CaptureService:
                 s.add(EvidenceLink(work_item_id=w.id, note_id=note.id, confidence="direct", attached_by="user"))
                 cap.status, cap.needs_context = "saved", False
                 return {"work_item_id": w.id, "note_id": note.id}
+            w = WorkItem(project_id=cap.project_id, session_id=cap.session_id,
+                         type=category or guess_type(text), title=provisional_title(text),
+                         description=text, description_edited=True, work_status="open",
+                         human_updated_at=datetime.now(timezone.utc))
+            s.add(w)
+            s.flush()
+            s.add(EvidenceLink(work_item_id=w.id, capture_id=cap.id, confidence="direct", attached_by="user"))
+            s.add(EvidenceLink(work_item_id=w.id, note_id=note.id, confidence="direct", attached_by="user"))
+            cap.status, cap.needs_context = "saved", False
             draft = DraftItem(project_id=cap.project_id, session_id=cap.session_id, origin="typed",
-                              type=category or guess_type(text), title=provisional_title(text), description=text)
+                              type=w.type, title=w.title, description=text,
+                              review_state="approved", work_item_id=w.id)
             s.add(draft)
             s.flush()
             s.add(EvidenceLink(draft_id=draft.id, capture_id=cap.id, confidence="direct", attached_by="user"))
             s.add(EvidenceLink(draft_id=draft.id, note_id=note.id, confidence="direct", attached_by="user"))
-            cap.status = "saved"
-            cap.needs_context = False
-            result = {"draft_id": draft.id, "note_id": note.id}
+            result = {"work_item_id": w.id, "note_id": note.id, "draft_id": draft.id}
         hooks.emit_state()
-        from .review import approve
-        result["work_item_id"] = approve([result["draft_id"]])[0]["work_item_id"]
         return result
 
     def quick_note(self, text: str, category: Optional[str] = None, *, mono: Optional[float] = None,

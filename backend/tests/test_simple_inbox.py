@@ -143,3 +143,15 @@ def test_late_transcript_attaches_without_overwriting_user_note(app_env):
     assert item["title"] == "My title" and item["description"] == "My note"
     speech = [e for e in item["evidence"] if e["kind"] == "segment"]
     assert len(speech) == 1 and speech[0]["text"] == "This button is broken"
+
+
+def test_note_before_inbox_reconcile_creates_only_one_task(app_env):
+    from checkpoint.services.inbox import reconcile, ensure_capture
+    from checkpoint.services.review import list_work_items
+    service, cid, _ = captured(app_env)
+    result = service.save_capture_note(cid, "First note")
+    reconcile()
+    service.save_capture_note(cid, "Edited note")
+    reconcile()
+    assert ensure_capture(cid) == result["work_item_id"]
+    assert len(list_work_items()) == 1

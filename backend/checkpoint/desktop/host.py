@@ -374,6 +374,7 @@ class DesktopHost:
         self.app.quit()
 
     def shutdown(self) -> None:
+        self.capture_button.clear()
         try:
             if self.hotkeys:
                 self.hotkeys.stop()
