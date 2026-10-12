@@ -74,7 +74,8 @@ class DesktopHost:
         self.toast = Toast()
         self.overlay = InboxPanel(open_settings=self.open_settings, recording=self._record_from_panel,
                                   recording_status=self.core.sessions.status,
-                                  processing_status=lambda: self.core.worker_status()["transcription"])
+                                  processing_status=lambda: self.core.worker_status()["transcription"],
+                                  new_session=self._new_session_from_panel)
         self.bridge.review_requested.connect(self._toggle_overlay)
         self.bridge.note_requested.connect(self.note_window.open_for)
         self.bridge.toast_requested.connect(lambda lvl, msg, work: self.toast.show_message(lvl, msg, work))
@@ -179,6 +180,21 @@ class DesktopHost:
         srcs = ", ".join(s["label"] for s in st.get("sources", [])) or "no audio"
         hooks.emit_toast("success", f"Session started · recording {srcs}. Change it any time from the tray.")
         self.bridge.state_changed.emit()
+
+    def _new_session_from_panel(self, project_id: str) -> None:
+        from ..services.sessions import remembered_setup
+
+        # Read the setup before ending so validation errors leave the running session intact.
+        from ..db import read_session
+        from ..models import Project
+        with read_session() as session:
+            project = session.get(Project, project_id)
+            if project is None or project.archived or project.is_demo:
+                raise ValueError("Choose an available project before starting a session.")
+        setup = remembered_setup(project_id)
+        self.core.sessions.end()
+        self.core.sessions.start(setup)
+        self._refresh_tray()
 
     def _record_from_panel(self):
         if self.core.sessions.active:

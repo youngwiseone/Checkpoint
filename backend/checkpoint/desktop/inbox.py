@@ -54,10 +54,11 @@ class ProjectPicker(QComboBox):
 
 class InboxPanel(QFrame):
     preview_ready = Signal(object, QImage)
-    def __init__(self, open_ui=None, open_settings=None, recording=None, recording_status=None, processing_status=None):
+    def __init__(self, open_ui=None, open_settings=None, recording=None, recording_status=None, processing_status=None, new_session=None):
         super().__init__()
         self.open_ui, self.open_settings, self.recording = open_ui, open_settings, recording
         self.recording_status, self.processing_status = recording_status, processing_status
+        self.new_session = new_session
         self.setObjectName('inbox')
         self.switcher_backdrop = True
         self.project_id = self.selected_id = self.undo_action = None
@@ -91,6 +92,11 @@ class InboxPanel(QFrame):
         self.project_picker.currentIndexChanged.connect(self._project_changed)
         self.project_picker.rename_requested.connect(self._rename_project)
         header.addWidget(self.project_picker, 1)
+        self.new_session_button = QPushButton('New session')
+        self.new_session_button.setAccessibleName('Start a new session for the current project')
+        self.new_session_button.setToolTip('End the current session and start a new one for this project.')
+        self.new_session_button.clicked.connect(self._new_session)
+        header.addWidget(self.new_session_button)
         self.settings_button = QPushButton()
         self.close_button = QPushButton()
         for button, kind, label, callback in ((self.settings_button, 'settings', 'Settings', self._settings),
@@ -219,6 +225,18 @@ class InboxPanel(QFrame):
         self.refresh()
         if self.isVisible():
             self.timer.start()
+
+    def _new_session(self):
+        if not self.project_id or self.project_picker.isEditable() or not self.new_session:
+            return
+        try:
+            self.new_session(self.project_id)
+        except ValueError as error:
+            self._notify(str(error))
+            return
+        self.session_picker.setCurrentIndex(0)
+        self.refresh()
+        self._notify('New session started for this project.')
 
     def _load_projects(self):
         from .settings import projects
@@ -415,6 +433,7 @@ class InboxPanel(QFrame):
                                      session_id=self.session_picker.currentData()))) if self.project_id else []
         recording = self.recording_status() if self.recording_status else {}
         self.project_picker.setEnabled(not recording.get('active'))
+        self.new_session_button.setEnabled(bool(self.project_id and self.new_session) and not self.project_picker.isEditable())
         if recording.get('active'):
             seconds = int(recording.get('offset_ms', 0) / 1000)
             sources = ', '.join(f"{source.get('label', source.get('kind', 'Audio'))}: {source.get('state', 'starting')}" for source in recording.get('sources', []))

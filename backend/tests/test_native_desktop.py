@@ -37,6 +37,40 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+def test_hold_menu_starts_and_replaces_session_for_selected_project(app_env):
+    from types import SimpleNamespace
+    from checkpoint.desktop.host import DesktopHost
+    from checkpoint.desktop.inbox import InboxPanel
+    from checkpoint.services.capture import default_project_id
+    from checkpoint.services.sessions import SessionManager
+    from checkpoint.db import read_session
+    from checkpoint.models import Session
+
+    application = app()
+    manager = SessionManager()
+    desktop = DesktopHost.__new__(DesktopHost)
+    desktop.core = SimpleNamespace(sessions=manager)
+    desktop._refresh_tray = Mock()
+    panel = InboxPanel(new_session=desktop._new_session_from_panel, recording_status=manager.status)
+    panel.project_id = default_project_id()
+    panel._load_projects()
+    panel.refresh()
+    try:
+        panel.new_session_button.click()
+        first = manager.active.id
+        assert manager.active.project_id == panel.project_id
+        panel.new_session_button.click()
+        assert manager.active.id != first
+        assert manager.active.project_id == panel.project_id
+        with read_session() as session:
+            assert session.get(Session, first).state == 'ended'
+        assert panel.session_picker.findData(manager.active.id) >= 0
+        assert 'New session started' in panel.message.text()
+    finally:
+        manager.shutdown()
+        panel.close()
+
+
 def settings_dialog(monkeypatch):
     from checkpoint import integrations
     from checkpoint.audio import devices
