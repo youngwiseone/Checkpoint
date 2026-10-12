@@ -148,6 +148,34 @@ def test_native_selection_maps_letterboxed_image_and_crop(app_env):
     crop(cid, None)
 
 
+def test_note_window_context_menu_can_edit_screenshot(app_env, monkeypatch):
+    application = app()
+    from checkpoint.desktop import editor
+    from checkpoint.desktop.windows import NoteWindow
+
+    opened = []
+
+    class FakeScreenshotDialog:
+        def __init__(self, capture_id, parent):
+            opened.append((capture_id, parent))
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(editor, "ScreenshotDialog", FakeScreenshotDialog)
+    monkeypatch.setattr(editor, "capture_path", lambda capture_id: "missing.png")
+    window = NoteWindow(Mock(), Mock(), Mock())
+    window.open_for({"id": "capture-1", "thumb_path": "missing.png"})
+    assert window.edit_image_btn.isVisible()
+    window.text.setPlainText("Remember this detail")
+    window.edit_image_btn.click()
+    assert opened == [("capture-1", window)]
+    assert window.text.toPlainText() == "Remember this detail"
+    window.open_for({})
+    assert not window.edit_image_btn.isVisible()
+    window.close()
+
+
 def test_desktop_open_uses_native_panel(app_env, monkeypatch):
     application = app()
     import webbrowser

@@ -142,6 +142,22 @@ class DesktopHost:
             return
         cap = self.core.capture
         if action == "capture":
+            active = self.core.sessions.active
+            has_audio = bool(
+                active
+                and self.core.sessions.audio_functioning()
+                and any(
+                    status["state"] in ("recording", "idle")
+                    and status["receiving"]
+                    and status["signal_recent"]
+                    for recorder in active.recorders.values()
+                    for status in (recorder.status(),)
+                )
+            )
+            if not has_audio:
+                self.capture_button.clear()
+                cap.hotkey_capture(ask_context=True, reason="no_audio")
+                return
             self.capture_button.tap(lambda: cap.hotkey_capture(ask_context=False),
                                     self.bridge.note_requested.emit, time.monotonic)
             return

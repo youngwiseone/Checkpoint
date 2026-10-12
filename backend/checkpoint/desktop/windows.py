@@ -149,6 +149,8 @@ class NoteWindow(QWidget):
         self.thumb.setObjectName("thumb")
         self.thumb.setFixedHeight(170)
         self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.edit_image_btn = QPushButton("Edit image")
+        self.edit_image_btn.clicked.connect(self._edit_image)
         self.prompt = QLabel("What should we remember about this?")
         self.text = QPlainTextEdit()
         self.text.setPlaceholderText("Describe what you noticed…")
@@ -184,7 +186,7 @@ class NoteWindow(QWidget):
         btns.addStretch(1)
         btns.addWidget(self.keep_btn)
         btns.addWidget(self.save_btn)
-        for w in (self.heading, self.sub, self.thumb, self.prompt, self.text):
+        for w in (self.heading, self.sub, self.thumb, self.edit_image_btn, self.prompt, self.text):
             lay.addWidget(w)
         lay.addWidget(self.mic_btn)
         lay.addWidget(self.dictation_status)
@@ -220,17 +222,19 @@ class NoteWindow(QWidget):
         if is_capture:
             self.heading.setText("Screenshot saved")
             reason = payload.get("reason")
-            self.sub.setText("No audio is recording, so add a quick note." if reason == "no_audio" else "Add context for this screenshot.")
+            self.sub.setText("No audible audio detected, so add a quick note." if reason == "no_audio" else "Add context for this screenshot.")
             pix = QPixmap(payload.get("thumb_path", ""))
             if not pix.isNull():
                 self.thumb.setPixmap(pix.scaled(404, 168, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             self.thumb.show()
+            self.edit_image_btn.show()
             self.keep_btn.setText("Keep for later  (Esc)")
             self.discard_btn.show()
         else:
             self.heading.setText("Quick note")
             self.sub.setText("A text-only note, no screenshot.")
             self.thumb.hide()
+            self.edit_image_btn.hide()
             self.keep_btn.setText("Cancel  (Esc)")
             self.discard_btn.hide()
         self._fit()
@@ -241,6 +245,17 @@ class NoteWindow(QWidget):
         self.activateWindow()
         win32.restore_foreground(int(self.winId()))
         self.text.setFocus()
+
+    def _edit_image(self) -> None:
+        capture_id = self.payload.get("id")
+        if not capture_id:
+            return
+        from .editor import ScreenshotDialog, capture_path
+
+        ScreenshotDialog(capture_id, self).exec()
+        pix = QPixmap(str(capture_path(capture_id)))
+        if not pix.isNull():
+            self.thumb.setPixmap(pix.scaled(404, 168, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def _place(self, work: Optional[dict]) -> None:
         if work:

@@ -109,7 +109,7 @@ class CaptureService:
             self._last_press[action] = now
             return False
 
-    def hotkey_capture(self, ask_context: bool) -> Optional[dict]:
+    def hotkey_capture(self, ask_context: bool, reason: Optional[str] = None) -> Optional[dict]:
         """Runs on the hotkey thread. Returns the capture payload or None on failure."""
         from ..capture import screen
 
@@ -146,7 +146,7 @@ class CaptureService:
             "thumb_path": str(media_path(cap["thumb_rel_path"])),
             "warnings": g.warnings,
             "needs_note": needs_note,
-            "reason": "asked" if (ask_context or settings.capture.always_ask_context or (active and active.always_ask_context)) else "no_audio",
+            "reason": reason or ("asked" if (ask_context or settings.capture.always_ask_context or (active and active.always_ask_context)) else "no_audio"),
         }
         if needs_note:
             if hooks.request_note:

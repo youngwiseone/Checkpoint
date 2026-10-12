@@ -88,3 +88,102 @@ def test_existing_default_shortcuts_migrate_to_one_f9_key():
     settings = AppSettings.model_validate(_upgrade({"version": 4, "hotkeys": {"capture": "F8", "review": "F9"}}))
     assert settings.hotkeys.capture == "F9"
     assert settings.hotkeys.review == ""
+
+
+def test_capture_hotkey_without_recent_audio_opens_context_menu():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from checkpoint.desktop.host import DesktopHost
+
+    capture = SimpleNamespace(hotkey_capture=Mock())
+    sessions = SimpleNamespace(active=None, audio_functioning=Mock(return_value=False))
+    host = DesktopHost.__new__(DesktopHost)
+    host.note_window = SimpleNamespace(isVisible=lambda: False)
+    host.overlay = SimpleNamespace(isVisible=lambda: False)
+    host.app = SimpleNamespace(activeModalWidget=lambda: None)
+    host.core = SimpleNamespace(capture=capture, sessions=sessions)
+    host.capture_button = SimpleNamespace(clear=Mock(), tap=Mock())
+
+    host._on_hotkey("capture")
+
+    host.capture_button.clear.assert_called_once()
+    capture.hotkey_capture.assert_called_once_with(ask_context=True, reason="no_audio")
+    host.capture_button.tap.assert_not_called()
+
+
+def test_capture_hotkey_uses_context_menu_when_active_audio_is_silent():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from checkpoint.desktop.host import DesktopHost
+
+    capture = SimpleNamespace(hotkey_capture=Mock())
+    recorder = SimpleNamespace(status=lambda: {"state": "recording", "receiving": True, "signal_recent": False})
+    active = SimpleNamespace(recorders={"mic": recorder})
+    sessions = SimpleNamespace(active=active, audio_functioning=lambda: True)
+    host = DesktopHost.__new__(DesktopHost)
+    host.note_window = SimpleNamespace(isVisible=lambda: False)
+    host.overlay = SimpleNamespace(isVisible=lambda: False)
+    host.app = SimpleNamespace(activeModalWidget=lambda: None)
+    host.core = SimpleNamespace(capture=capture, sessions=sessions)
+    host.capture_button = SimpleNamespace(clear=Mock(), tap=Mock())
+
+    host._on_hotkey("capture")
+
+    capture.hotkey_capture.assert_called_once_with(ask_context=True, reason="no_audio")
+    host.capture_button.tap.assert_not_called()
+
+
+def test_capture_hotkey_keeps_gestures_when_audio_is_recently_audible():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from checkpoint.desktop.host import DesktopHost
+
+    capture = SimpleNamespace(hotkey_capture=Mock())
+    active = SimpleNamespace(recorders={"mic": SimpleNamespace(status=lambda: {"state": "recording", "receiving": True, "signal_recent": True})})
+    sessions = SimpleNamespace(active=active, audio_functioning=lambda: True)
+    host = DesktopHost.__new__(DesktopHost)
+    host.note_window = SimpleNamespace(isVisible=lambda: False)
+    host.overlay = SimpleNamespace(isVisible=lambda: False)
+    host.app = SimpleNamespace(activeModalWidget=lambda: None)
+    host.core = SimpleNamespace(capture=capture, sessions=sessions)
+    host.capture_button = SimpleNamespace(clear=Mock(), tap=Mock())
+    host.bridge = SimpleNamespace(note_requested=SimpleNamespace(emit=Mock()))
+
+    host._on_hotkey("capture")
+
+    host.capture_button.tap.assert_called_once()
+    capture.hotkey_capture.assert_not_called()
+
+
+def test_capture_hotkey_does_not_use_stale_signal_from_disconnected_source():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from checkpoint.desktop.host import DesktopHost
+
+    for state, receiving in (("failed", False), ("reconnecting", True), ("recording", False)):
+        capture = SimpleNamespace(hotkey_capture=Mock())
+        active = SimpleNamespace(recorders={
+            "mic": SimpleNamespace(status=lambda: {
+                "state": state, "receiving": receiving, "signal_recent": True,
+            }),
+            "loopback": SimpleNamespace(status=lambda: {
+                "state": "idle", "receiving": True, "signal_recent": False,
+            }),
+        })
+        host = DesktopHost.__new__(DesktopHost)
+        host.note_window = SimpleNamespace(isVisible=lambda: False)
+        host.overlay = SimpleNamespace(isVisible=lambda: False)
+        host.app = SimpleNamespace(activeModalWidget=lambda: None)
+        host.core = SimpleNamespace(capture=capture, sessions=SimpleNamespace(
+            active=active, audio_functioning=lambda: True,
+        ))
+        host.capture_button = SimpleNamespace(clear=Mock(), tap=Mock())
+
+        host._on_hotkey("capture")
+
+        capture.hotkey_capture.assert_called_once_with(ask_context=True, reason="no_audio")
+        host.capture_button.tap.assert_not_called()
