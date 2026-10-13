@@ -1,10 +1,49 @@
-"""Small, crisp icons shared by the Pearl Glass controls."""
+"""Checkpoint branding and small, crisp icons for the Pearl Glass controls."""
 import math
+from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtWidgets import QLabel
 
 from . import colors
+
+
+LOGO_PATH = Path(__file__).resolve().parents[3] / 'icon' / 'checkpoint_logo.svg'
+
+
+def app_icon(status=None, ring=None):
+    """Use the supplied SVG, with an optional tray status badge at every icon size."""
+    logo = QIcon(str(LOGO_PATH))
+    if status is None:
+        return logo
+    c = colors.current()
+    icon = QIcon()
+    for size in (16, 20, 24, 32, 48, 64, 128, 256):
+        image = QPixmap(size, size)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        mark = logo.pixmap(size, size)
+        painter.drawPixmap((size - mark.width()) // 2, (size - mark.height()) // 2, mark)
+        painter.scale(size / 64, size / 64)
+        painter.setBrush(getattr(c, status))
+        painter.setPen(QPen(getattr(c, ring) if ring else c.surface_2, 4))
+        painter.drawEllipse(QRectF(44, 44, 18, 18))
+        painter.end()
+        icon.addPixmap(image)
+    return icon
+
+
+def app_logo(parent=None, size=32):
+    """A display-only logo that stays sharp on high-DPI screens."""
+    label = QLabel(parent)
+    label.setFixedSize(size, size)
+    label.setPixmap(app_icon().pixmap(QSize(size, size), label.devicePixelRatioF()))
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setAccessibleName('Checkpoint')
+    label.setToolTip('Checkpoint')
+    return label
 
 
 def control_icon(kind, color=None, active=False):

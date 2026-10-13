@@ -15,42 +15,21 @@ import sys
 import time
 from typing import Optional
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from ..core import get_core
 from ..events import hooks, notices
 from ..settings_store import get_settings
-from . import colors
+from .icons import app_icon
 from .inbox import InboxPanel
 from .gestures import CaptureButton
 from .windows import NoteWindow, Toast
 
 log = logging.getLogger(__name__)
 INSTANCE_KEY = f"Checkpoint-{getpass.getuser()}"
-
-
-def _icon(color: str, ring: Optional[str] = None) -> QIcon:
-    """A tray icon in the theme's colours (as it was at startup): a dot of `color` (a palette key) on a rounded tile."""
-    c = colors.current()
-    pm = QPixmap(64, 64)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setBrush(c.surface_2)
-    p.setPen(c.accent)
-    p.drawRoundedRect(4, 4, 56, 56, 14, 14)
-    p.setBrush(getattr(c, color))
-    p.setPen(Qt.PenStyle.NoPen)
-    p.drawEllipse(20, 20, 24, 24)
-    if ring:
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(getattr(c, ring))
-        p.drawEllipse(14, 14, 36, 36)
-    p.end()
-    return QIcon(pm)
 
 
 class Bridge(QObject):
@@ -69,6 +48,7 @@ class DesktopHost:
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
         self.app.setApplicationName("Checkpoint")
+        self.app.setWindowIcon(app_icon())
         self.show_panel = show_panel
         self.core = get_core()
         self.bridge = Bridge()
@@ -404,15 +384,16 @@ class DesktopHost:
     # ------------------------------------------------------------ tray
     def _build_tray(self) -> None:
         self.icons = {
-            "idle": _icon("muted"),
-            "recording": _icon("danger"),
-            "session": _icon("accent"),
-            "paused": _icon("warn"),
-            "problem": _icon("danger", ring="warn"),
+            "idle": app_icon(),
+            "recording": app_icon("danger"),
+            "session": app_icon("accent"),
+            "paused": app_icon("warn"),
+            "problem": app_icon("danger", ring="warn"),
         }
         self.tray = QSystemTrayIcon(self.icons["idle"])
         menu = QMenu()
         self.act_open = QAction("Open Checkpoint", triggered=self.open_ui)
+        self.act_open.setIcon(self.icons["idle"])
         self.act_status = QAction("No session running")
         self.act_status.setEnabled(False)
         self.act_start = QAction("Start recording", triggered=self._record_from_panel)

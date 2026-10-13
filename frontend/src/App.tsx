@@ -77,7 +77,7 @@ export default function App() {
   return (
     <div className="app">
       <nav className="sidebar" aria-label="Main">
-        <div className="brand"><span className="brand-mark" aria-hidden /><span>Checkpoint</span></div>
+        <div className="brand"><img className="brand-mark" src="/checkpoint_logo.svg" alt="" /><span>Checkpoint</span></div>
         {state?.first_run_complete && <ProjectSwitcher />}
         <NavLink to="/" end className="nav-link">
           <Radio size={18} /><span className="label">Session</span>

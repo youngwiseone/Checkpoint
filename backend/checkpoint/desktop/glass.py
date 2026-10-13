@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QHBoxLayo
 from . import colors
 from .windows import logical_point_for_physical, popup_css
 from .backdrop import capture_backdrop, paint_backdrop
-from .icons import control_icon
+from .icons import app_logo, control_icon
 
 
 def paint_glass(painter, rect, c, radius=22, strength=1.0):
@@ -63,6 +63,7 @@ class GlassDialog(QDialog):
         layout.setContentsMargins(26, 22, 26, 24)
         layout.setSpacing(16)
         header = QHBoxLayout()
+        header.addWidget(app_logo(self))
         title = QLabel(self.windowTitle())
         title.setStyleSheet('font-size: 23px; font-weight: 600; background: transparent;')
         header.addWidget(title, 1)

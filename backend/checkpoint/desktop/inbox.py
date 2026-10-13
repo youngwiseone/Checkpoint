@@ -15,7 +15,7 @@ from ..storage import media_path
 from . import colors
 from .windows import popup_css
 from .glass import center_on_screen, GlassDialog, get_text, paint_glass
-from .icons import control_icon
+from .icons import app_logo, control_icon
 from .cards import TaskDeck
 from .backdrop import capture_backdrop, paint_backdrop
 
@@ -69,6 +69,7 @@ class InboxPanel(QFrame):
 
         self.toolbar = QGridLayout()
         self.toolbar.setSpacing(8)
+        self.logo = app_logo(self)
         self._toolbar_wide = None
         self.project_picker = ProjectPicker()
         self.project_picker.setObjectName('toolbarPicker')
@@ -289,23 +290,24 @@ class InboxPanel(QFrame):
         self._toolbar_wide = wide
         while self.toolbar.count():
             self.toolbar.takeAt(0)
-        for column in range(7):
+        for column in range(8):
             self.toolbar.setColumnStretch(column, 0)
         if wide:
-            for column, widget in enumerate((self.project_picker, self.search, self.status_picker,
+            for column, widget in enumerate((self.logo, self.project_picker, self.search, self.status_picker,
                                             self.session_picker, self.settings_button,
                                             self.record_button, self.close_button)):
                 self.toolbar.addWidget(widget, 0, column)
-            self.toolbar.setColumnStretch(0, 2)
-            self.toolbar.setColumnStretch(1, 4)
+            self.toolbar.setColumnStretch(1, 2)
+            self.toolbar.setColumnStretch(2, 4)
         else:
-            self.toolbar.addWidget(self.project_picker, 0, 0, 1, 3)
-            for column, widget in enumerate((self.settings_button, self.record_button, self.close_button), 3):
+            self.toolbar.addWidget(self.logo, 0, 0)
+            self.toolbar.addWidget(self.project_picker, 0, 1, 1, 3)
+            for column, widget in enumerate((self.settings_button, self.record_button, self.close_button), 4):
                 self.toolbar.addWidget(widget, 0, column)
-            self.toolbar.addWidget(self.search, 1, 0, 1, 2)
-            self.toolbar.addWidget(self.status_picker, 1, 2, 1, 2)
-            self.toolbar.addWidget(self.session_picker, 1, 4, 1, 2)
-            self.toolbar.setColumnStretch(0, 1)
+            self.toolbar.addWidget(self.search, 1, 0, 1, 3)
+            self.toolbar.addWidget(self.status_picker, 1, 3, 1, 2)
+            self.toolbar.addWidget(self.session_picker, 1, 5, 1, 2)
+            self.toolbar.setColumnStretch(1, 1)
         margin = 36 if wide else 22
         self.layout().setContentsMargins(margin, 24, margin, 24)
 

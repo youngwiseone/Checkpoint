@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icon/checkpoint_logo.svg" alt="Checkpoint logo" width="128" />
+</p>
+
 # Checkpoint
 
 Capture issues. Turn them into to-dos. Work through them with your assistant.

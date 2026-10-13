@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="741" height="727" viewBox="0 0 741 727" fill="none">
+  <title>Checkpoint Logo Monocolor</title>
+  <g id="checkpoint-logo-monocolor" fill="#9BC5FD">
+    <polygon id="main-body" points="26,648 164,517 165,388 638,388 707,319 707,59 570,187 569,281 165,281 165,144 537,144 666,25 73,25 26,71"/>
+    <polygon id="bottom-base" points="68,689 715,692 576,555 202,555"/>
+    <rect id="top-slot" x="471" y="160" width="42" height="102"/>
+    <rect id="label-line-1" x="224" y="415" width="287" height="39"/>
+    <rect id="label-line-2" x="224" y="479" width="287" height="39"/>
+  </g>
+</svg>

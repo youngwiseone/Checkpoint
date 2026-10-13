@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from ..capture import win32
 from . import colors
 from .colors import css
-from .icons import control_icon
+from .icons import app_logo, control_icon
 from .backdrop import capture_backdrop, paint_backdrop
 
 from .styles import note_css, popup_css
@@ -84,6 +84,7 @@ class NoteWindow(QWidget):
         self.heading = QLabel("Screenshot saved")
         self.heading.setObjectName("title")
         header = QHBoxLayout()
+        header.addWidget(app_logo(self))
         header.addWidget(self.heading, 1)
         self.menu_btn = QPushButton('Open menu')
         self.menu_btn.clicked.connect(self._open_menu)
