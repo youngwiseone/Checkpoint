@@ -18,7 +18,7 @@ class HotkeySettings(BaseModel):
     capture_context: str = "Shift+F8"
     quick_note: str = "F9"
     start_session: str = "Ctrl+F8"  # start a session (the offered project, else the last one); press twice quickly to end
-    review: str = ""  # triple-tapping capture opens review
+    review: str = ""  # holding capture opens review
     switch_project: str = "Shift+F9"  # switch project, or set up a new one, and start a session there
 
 

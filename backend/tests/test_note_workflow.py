@@ -273,7 +273,7 @@ def test_uncertain_word_highlights_and_selection_plays_short_excerpt(app_env):
     win._close()
 
 
-def test_hold_captures_initial_frame_and_saves_on_release(app_env, monkeypatch):
+def test_tap_then_hold_captures_first_frame_and_saves_on_release(app_env, monkeypatch):
     from test_native_desktop import app
     from checkpoint.desktop import host as desktop, windows
     from checkpoint.audio import dictation
@@ -298,8 +298,21 @@ def test_hold_captures_initial_frame_and_saves_on_release(app_env, monkeypatch):
         start=Mock(), stop=Mock(), cancel=Mock())
     monkeypatch.setattr(dictation, 'NoteDictation', lambda device: recording)
     host = desktop.DesktopHost(show_panel=False)
+    from test_capture_gestures import Scheduler
+    scheduler = Scheduler()
+    host.capture_button = desktop.CaptureButton(scheduler.schedule)
+    now = [1.0]
+    monkeypatch.setattr(desktop.time, 'monotonic', lambda: now[0])
+    host._on_hotkey('press')
+    recording.start.assert_not_called()
+    host._on_hotkey('capture')
+    assert not list_work_items()
+    now[0] += .2
     host._on_hotkey('press')
     recording.start.assert_called_once()
+    now[0] += .6
+    scheduler.flush()
+    assert not list_work_items() and not host.note_window.isVisible()
     host._on_hotkey('hold')
     application.processEvents()
     assert len(list_work_items()) == 1 and len(host._held_jobs) == 1

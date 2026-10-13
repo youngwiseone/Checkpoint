@@ -66,5 +66,5 @@ if ($ok -ne 0) { Fail "Preflight reported errors (see above)." }
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host "  Start Checkpoint:  start.cmd"
-Write-Host "  Optional: hold the capture key, open Settings, and download a transcription model."
+Write-Host "  Optional: open Settings and download a transcription model, then tap, release, and hold the capture key for voice notes."
 Write-Host ""

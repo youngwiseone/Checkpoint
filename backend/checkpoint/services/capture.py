@@ -161,7 +161,7 @@ class CaptureService:
                 notices.push("info", "Screenshot saved to Unfinished captures — add context from the app.", "capture")
         else:
             label = fmt_offset(cap["offset_ms"])
-            hint = " · double tap to edit, triple tap to review"
+            hint = " · double tap to edit, hold to review"
             hooks.emit_toast("success" if not g.warnings else "warning",
                              g.warnings[0] if g.warnings else f"Screenshot saved at {label}{hint}", g.work_rect)
         hooks.emit_state()

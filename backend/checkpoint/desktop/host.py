@@ -125,7 +125,7 @@ class DesktopHost:
         return payload
 
     def _on_hotkey(self, action: str) -> None:
-        """Hotkey thread: freeze the initial frame and record until release."""
+        """Hotkey thread: freeze the first tap's frame; tap-then-hold records until release."""
         if action == 'review':
             self.capture_button.clear()
             self._overlay_hotkey(action)
@@ -134,16 +134,20 @@ class DesktopHost:
             self._prepared_press = None
             self._press_recording = None
             if self.note_window.isVisible() or self.overlay.isVisible() or self.app.activeModalWidget() is not None:
+                self.capture_button.clear()
                 return
+            continuation = self.capture_button.press(time.monotonic)
             from ..capture import screen
             from datetime import datetime, timezone
             active = self.core.sessions.active
             mic_recorder = active.recorders.get('mic') if active else None
-            if get_settings().audio.mic_enabled or mic_recorder:
+            if continuation and (get_settings().audio.mic_enabled or mic_recorder):
                 from ..audio.dictation import NoteDictation
                 self._press_recording = NoteDictation(getattr(mic_recorder, 'device_name', get_settings().audio.mic_device))
                 self._press_recording.project_id = active.project_id if active else get_settings().last_project_id
                 self._press_recording.start()
+            if continuation:
+                return
             mono, taken = time.monotonic(), datetime.now(timezone.utc)
             try:
                 self._prepared_press = (screen.grab(active.capture_target if active else 'foreground', get_settings().capture.region), mono, taken)
@@ -156,26 +160,8 @@ class DesktopHost:
                 self._press_recording = None
             return
         if action == 'hold':
-            self.capture_button.clear()
-            prepared = self._prepared_press
             self._prepared_press = None
-            if not prepared:
-                if self._press_recording:
-                    self._press_recording.cancel()
-                return
-            payload = self.core.capture.hotkey_capture(False, prepared=prepared, quiet=True)
-            if not payload:
-                if self._press_recording:
-                    self._press_recording.cancel()
-                return
-            self.capture_button.previous = payload
-            recording = self._press_recording
-            if recording:
-                self.bridge.held_note.emit((payload, recording))
-                hooks.emit_toast('info', 'Listening… release the capture key to save your voice note.', payload.get('work_rect'),)
-            else:
-                self.bridge.note_requested.emit(payload)
-                self.bridge.setup_requested.emit('Audio')
+            self.capture_button.hold(review=lambda: self._overlay_hotkey('review'))
             return
         if action == 'capture':
             if getattr(self, '_press_recording', None):
@@ -193,7 +179,23 @@ class DesktopHost:
                 return self.core.capture.hotkey_capture(ask_context=not has_audio,
                     reason=None if has_audio else 'no_audio', **({'prepared': prepared} if prepared else {}))
             self.capture_button.tap(grab, self.bridge.note_requested.emit, time.monotonic,
-                                    review=lambda: self._overlay_hotkey('review'), latest=self._latest_note)
+                                    latest=self._latest_note, voice=lambda: self._start_held_note(prepared))
+
+    def _start_held_note(self, prepared):
+        payload = self.core.capture.hotkey_capture(False, prepared=prepared, quiet=True) if prepared else None
+        if not payload:
+            if self._press_recording:
+                self._press_recording.cancel()
+                self._press_recording = None
+            return
+        self.capture_button.previous = payload
+        recording = self._press_recording
+        if recording:
+            self.bridge.held_note.emit((payload, recording))
+            hooks.emit_toast('info', 'Listening… release the capture key to save your voice note.', payload.get('work_rect'))
+        else:
+            self.bridge.note_requested.emit(payload)
+            self.bridge.setup_requested.emit('Audio')
 
     def _track_held_note(self, job):
         self._held_jobs.append(job)
@@ -247,7 +249,7 @@ class DesktopHost:
         dialog.setWindowTitle('Set up voice notes')
         dialog.resize(420, 180)
         layout = dialog.content_layout()
-        message = QLabel('Enable your microphone in Audio settings to record while holding the capture key.' if tab == 'Audio'
+        message = QLabel('Enable your microphone in Audio settings, then tap, release, and hold the capture key to record a voice note.' if tab == 'Audio'
                          else 'Your recording is saved. Download the speech model in Transcript settings to turn voice notes into text.')
         message.setWordWrap(True)
         layout.addWidget(message)
@@ -423,7 +425,7 @@ class DesktopHost:
         st = self.core.sessions.status()
         live = bool(st.get("active"))
         hk = get_settings().hotkeys.review
-        self.act_review.setText(f"Review inbox  ({hk + ', ' if hk else ''}triple tap capture)")
+        self.act_review.setText(f"Review inbox  ({hk + ', ' if hk else ''}hold capture)")
         for a in (self.act_pause, self.act_mic, self.act_loop, self.act_end):
             a.setVisible(live)
         self.act_start.setVisible(not live)
@@ -567,7 +569,7 @@ class DesktopHost:
             self.tray.showMessage("Shortcut conflict", msg[:200], QSystemTrayIcon.MessageIcon.Warning, 8000)
         self.app.aboutToQuit.connect(lambda: None if self._quitting else self.shutdown())
         log.info("Desktop host running with native popups")
-        print("Checkpoint is running in the tray. Triple tap the capture key to review; hold it to dictate a note.")
+        print("Checkpoint is running in the tray. Hold the capture key to review; tap, release, then hold to dictate a note.")
         if self.show_panel:
             self.open_ui()
         return self.app.exec()

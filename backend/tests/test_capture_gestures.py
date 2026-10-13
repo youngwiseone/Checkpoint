@@ -69,7 +69,7 @@ def test_hold_cancels_pending_capture_and_keeps_last_screenshot():
     assert button.previous == {'id': 'last'}
 
 
-def test_hold_starts_dictation_and_tap_waits_for_release():
+def test_hold_threshold_and_tap_waits_for_release():
     for duration, expected in ((.1, "capture"), (2, "hold")):
         now = [0.0]
         def wait(seconds):
@@ -90,14 +90,64 @@ def test_existing_default_shortcuts_migrate_to_one_f9_key():
     assert settings.hotkeys.review == ""
 
 
-def test_triple_tap_opens_review_without_capture_or_editor():
+def test_plain_hold_opens_review_without_capture_or_voice_note():
     scheduler = Scheduler()
     button = CaptureButton(scheduler.schedule)
-    shots, notes, reviews = [], [], []
-    for at in (1, 1.2, 1.4):
-        button.tap(lambda: shots.append(True), notes.append, lambda at=at: at, lambda: reviews.append(True))
+    reviews = []
+    assert not button.press(lambda: 1)
+    button.hold(lambda: reviews.append(True))
     scheduler.flush()
-    assert shots == notes == [] and reviews == [True]
+    assert reviews == [True] and button.pending is None
+
+
+def test_tap_then_hold_reserves_first_capture_and_dictates_without_opening_editor():
+    scheduler = Scheduler()
+    button = CaptureButton(scheduler.schedule)
+    shots, notes, reviews, voices = [], [], [], []
+    button.tap(lambda: shots.append(True), notes.append, lambda: 1, voice=lambda: voices.append(True))
+    timer_callback = scheduler.jobs[0][1]
+    assert button.press(lambda: 1.2)
+    scheduler.flush()  # The single-tap timeout passes during the second hold.
+    timer_callback()  # Even a timer already waiting for the lock cannot capture.
+    assert shots == notes == voices == reviews == []
+    button.hold(lambda: reviews.append(True))
+    scheduler.flush()
+    assert voices == [True] and shots == notes == reviews == []
+    assert button.pending is None
+
+
+def test_second_press_released_before_hold_edits_even_after_tap_timeout():
+    scheduler = Scheduler()
+    button = CaptureButton(scheduler.schedule)
+    notes, voices = [], []
+    button.tap(lambda: {'id': 'first'}, notes.append, lambda: 1, voice=lambda: voices.append(True))
+    assert button.press(lambda: 1.4)
+    scheduler.flush()
+    button.tap(lambda: {'id': 'second'}, notes.append, lambda: 1.8)
+    scheduler.flush()
+    assert notes == [{'id': 'first', 'needs_note': True}] and voices == []
+
+
+def test_hold_after_tap_window_is_a_separate_menu_gesture():
+    scheduler = Scheduler()
+    button = CaptureButton(scheduler.schedule)
+    shots, reviews, voices = [], [], []
+    button.tap(lambda: shots.append(True), lambda _: None, lambda: 1, voice=lambda: voices.append(True))
+    assert not button.press(lambda: 1.6)
+    button.hold(lambda: reviews.append(True))
+    scheduler.flush()
+    assert shots == reviews == [True] and voices == []
+
+
+def test_clear_during_second_press_cancels_pending_voice_note():
+    scheduler = Scheduler()
+    button = CaptureButton(scheduler.schedule)
+    shots, voices = [], []
+    button.tap(lambda: shots.append(True), lambda _: None, lambda: 1, voice=lambda: voices.append(True))
+    assert button.press(lambda: 1.2)
+    button.clear()
+    scheduler.flush()
+    assert shots == voices == [] and button.pending is None
 
 
 def test_double_tap_uses_persisted_latest_task_after_restart():
@@ -108,7 +158,7 @@ def test_double_tap_uses_persisted_latest_task_after_restart():
         raise AssertionError('Double tap should not capture when a task already exists')
     for at in (1, 1.2):
         button.tap(grab, notes.append, lambda at=at: at, latest=lambda: {'id': 'persisted', 'text': 'Previous note'})
-    assert notes == []  # Give a third tap time to arrive.
+    assert notes[0]['id'] == 'persisted'  # Double tap can now open immediately on release.
     scheduler.flush()
     assert notes[0]['id'] == 'persisted' and notes[0]['text'] == 'Previous note'
 
@@ -131,3 +181,33 @@ def test_capture_hotkey_without_audio_keeps_multitap_gestures():
     # Only a confirmed single tap captures and opens the note window.
     host.capture_button.tap.call_args.args[0]()
     capture.hotkey_capture.assert_called_once_with(ask_context=True, reason='no_audio')
+
+
+def test_host_plain_hold_opens_menu_without_starting_microphone(app_env, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from checkpoint.desktop import host as desktop
+    from checkpoint.audio import dictation
+    from checkpoint.capture import screen
+    from checkpoint.settings_store import update_settings
+    update_settings({'audio': {'mic_enabled': True}})
+    microphone = Mock()
+    monkeypatch.setattr(dictation, 'NoteDictation', microphone)
+    monkeypatch.setattr(screen, 'grab', Mock(return_value='frame'))
+    host = desktop.DesktopHost.__new__(desktop.DesktopHost)
+    host.note_window = SimpleNamespace(isVisible=lambda: False)
+    host.overlay = SimpleNamespace(isVisible=lambda: False)
+    host.app = SimpleNamespace(activeModalWidget=lambda: None)
+    host.core = SimpleNamespace(capture=Mock(), sessions=SimpleNamespace(active=None))
+    host.bridge = SimpleNamespace(note_requested=SimpleNamespace(emit=Mock()))
+    host._overlay_hotkey = Mock()
+    scheduler = Scheduler()
+    host.capture_button = CaptureButton(scheduler.schedule)
+    host._on_hotkey('press')
+    host._on_hotkey('hold')
+    host._on_hotkey('release')
+    scheduler.flush()
+    host._overlay_hotkey.assert_called_once_with('review')
+    microphone.assert_not_called()
+    host.core.capture.hotkey_capture.assert_not_called()
+    host.bridge.note_requested.emit.assert_not_called()

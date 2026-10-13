@@ -274,7 +274,7 @@ export default function NewSession() {
           {mic || loop ? (
             <Banner kind="warn">
               <p><b>Will record: {recordingSummary}.</b> Tell everyone on the call that you're recording.</p>
-              <p className="small">Tap F9 to save a screenshot; double-tap to edit, triple-tap to review, or hold to dictate.</p>
+              <p className="small">Tap F9 to save a screenshot; double-tap to edit, hold to review, or tap then hold to dictate.</p>
             </Banner>
           ) : (
             <Banner kind="info"><p><b>No audio selected — tapping F9 will ask for a note.</b> Screenshots and notes are saved immediately either way.</p></Banner>

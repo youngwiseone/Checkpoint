@@ -22,7 +22,7 @@ You'll need **Windows 10/11** and **Python 3.11 or newer**.
    ```
 
 3. Double-click **start.cmd**.
-4. Triple-tap **F9** and choose or create a project to group your captures.
+4. Hold **F9** and choose or create a project to group your captures.
 
 Next time, just double-click **start.cmd**. Closing the review window leaves Checkpoint running in the system tray. Use **Quit** in the tray to exit.
 
@@ -32,8 +32,10 @@ Next time, just double-click **start.cmd**. Closing the review window leaves Che
 |---|---|
 | Tap **F9** | Save a screenshot as an open task. |
 | Double-tap **F9** | Reopen the last task to edit it. |
-| Triple-tap **F9** | Review your tasks. |
-| Hold **F9** | Capture on the initial press and record a voice note until release (up to 60 seconds). |
+| Hold **F9** | Open the main menu to review your tasks. |
+| Tap, release, then hold **F9** | Capture on the first tap and record a voice note during the second hold. Release to save (up to 60 seconds). |
+
+For a voice note, make the second press quickly after releasing the first tap, then hold while speaking. A plain hold opens the main menu.
 
 In the note window, type or click **Dictate note**, then **Save**. Double-tap **F9** any time to edit the last task again, or click **Open menu** in the editor to review your tasks. Closing an edited task keeps your written changes. For dictation, first enable your microphone in **Settings → Audio** and download the speech model in **Settings → Transcript**. It runs offline after download.
 

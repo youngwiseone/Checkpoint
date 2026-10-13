@@ -160,7 +160,7 @@ export default function ActiveSession() {
         <div className="stack-lg">
           <div className="card">
             <div className="card-head"><h3>Capture</h3>
-              <span className="kbd-hints">Tap capture · double tap to edit · triple tap to review · hold to dictate</span>
+              <span className="kbd-hints">Tap capture · double tap to edit · hold to review · tap then hold to dictate</span>
             </div>
             {!state!.desktop.available && <Banner kind="warn">Global hotkeys need the desktop helper. Launch Checkpoint with <code>start.cmd</code>.</Banner>}
             {state!.desktop.available && state!.desktop.hotkeys.ok === false && <Banner kind="warn">Shortcut problem: {state!.desktop.hotkeys.reason}. <Link to="/settings">Change shortcuts</Link></Banner>}
