@@ -17,9 +17,8 @@ def test_review_opens_centered_every_time_and_keeps_transparent_space(app_env):
     create_work_item(pid, 'bug', 'Review card', 'Captured note')
     panel = InboxPanel()
     screen = app.primaryScreen().availableGeometry()
-    work = {'left': screen.left(), 'top': screen.top(), 'width': screen.width(), 'height': screen.height()}
     for _ in range(2):
-        panel.toggle(pid, work)
+        panel.toggle(pid)
         app.processEvents()
         assert (panel.geometry().center() - screen.center()).manhattanLength() <= 2
         assert panel.deck.card_rect().width() <= 320

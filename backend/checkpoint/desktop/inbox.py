@@ -4,7 +4,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from sqlalchemy import select
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal, QSize
-from PySide6.QtGui import QImage, QImageReader, QPixmap, QPainter, QDesktopServices, QGuiApplication
+from PySide6.QtGui import QImage, QImageReader, QPixmap, QPainter, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QProgressBar, QPushButton, QVBoxLayout, QMenu)
 
@@ -13,8 +13,8 @@ from ..db import read_session, write_session
 from ..models import Capture, Project, Session, Setting
 from ..storage import media_path
 from . import colors
-from .windows import popup_css
-from .glass import center_on_screen, GlassDialog, get_text, paint_glass
+from .windows import popup_css, screen_under_mouse
+from .glass import GlassDialog, get_text, paint_glass
 from .icons import app_logo, control_icon
 from .cards import TaskDeck
 from .backdrop import capture_backdrop, paint_backdrop
@@ -537,7 +537,7 @@ class InboxPanel(QFrame):
         except (OSError, ValueError) as error:
             self._notify(str(error))
 
-    def toggle(self, project_id, work=None):
+    def toggle(self, project_id):
         if self.isVisible():
             self.hide()
             return
@@ -551,8 +551,7 @@ class InboxPanel(QFrame):
         self._load_projects()
         self.setStyleSheet(popup_css(colors.current()))
         self.refresh()
-        center_on_screen(self, work)
-        screen = QGuiApplication.screenAt(self.frameGeometry().center()) or QGuiApplication.primaryScreen()
+        screen = screen_under_mouse()
         if screen:
             self.setGeometry(screen.availableGeometry().adjusted(12, 12, -12, -12))
         self.layout().activate()

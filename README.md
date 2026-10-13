@@ -35,6 +35,8 @@ Next time, just double-click **start.cmd**. Closing the review window leaves Che
 | Hold **F9** | Open the main menu to review your tasks. |
 | Tap, release, then hold **F9** | Capture on the first tap and record a voice note during the second hold. Release to save (up to 60 seconds). |
 
+Popups open on the display containing your mouse pointer, including the note editor, review menu, settings and notifications.
+
 To record a voice note, **tap F9 and release it, then quickly press F9 again and hold it while speaking**. Release the second press to stop recording and save the voice note. The screenshot comes from the first tap.
 
 **Holding F9 on its own opens the main menu**, replacing the previous triple-tap shortcut.

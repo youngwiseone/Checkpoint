@@ -1,12 +1,12 @@
 """Shared translucent surfaces and frameless dialogs for the native desktop UI."""
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QCursor, QGuiApplication, QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
                               QHeaderView, QLabel, QLineEdit, QListView, QPlainTextEdit,
                               QPushButton, QSplitter, QTreeView, QVBoxLayout)
 
 from . import colors
-from .windows import logical_point_for_physical, popup_css
+from .windows import popup_css, screen_under_mouse
 from .backdrop import capture_backdrop, paint_backdrop
 from .icons import app_logo, control_icon
 
@@ -33,15 +33,8 @@ def paint_glass(painter, rect, c, radius=22, strength=1.0):
     painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), radius - 2, radius - 2)
 
 
-def center_on_screen(widget, work=None):
-    if work:
-        point = logical_point_for_physical(work['left'] + work['width'] // 2,
-                                           work['top'] + work['height'] // 2)
-    elif widget.parentWidget() and widget.parentWidget().isVisible():
-        point = widget.parentWidget().window().frameGeometry().center()
-    else:
-        point = QCursor.pos()
-    screen = QGuiApplication.screenAt(point) or QGuiApplication.primaryScreen()
+def center_on_screen(widget):
+    screen = screen_under_mouse()
     if not screen:
         return
     available = screen.availableGeometry().adjusted(12, 12, -12, -12)

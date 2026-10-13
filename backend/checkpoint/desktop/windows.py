@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 from typing import Callable, Optional
 
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QFont, QGuiApplication, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QIcon, QFont, QGuiApplication, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -28,6 +28,11 @@ from .styles import note_css, popup_css
 
 CATEGORIES = [("", "No category"), ("bug", "Bug"), ("improvement", "Improvement"), ("idea", "Idea"),
               ("task", "Task"), ("question", "Question"), ("note", "Note")]
+
+
+def screen_under_mouse():
+    """Select a popup's display using Qt's logical cursor coordinates."""
+    return QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
 
 
 def logical_point_for_physical(x: int, y: int) -> QPoint:
@@ -253,7 +258,7 @@ class NoteWindow(QWidget):
         if self.image_picker.count():
             self._selected_image()
         self._fit()
-        self._place(payload.get("work_rect"))
+        self._place()
         self.backdrop = capture_backdrop(self)
         self.show()
         win32.exclude_from_capture(int(self.winId()))
@@ -407,13 +412,11 @@ class NoteWindow(QWidget):
         if self.payload.get('item_id'):
             self._reload_evidence()
 
-    def _place(self, work: Optional[dict]) -> None:
-        if work:
-            br = logical_point_for_physical(work["left"] + work["width"] - 1, work["top"] + work["height"] - 1)
-            tl = logical_point_for_physical(work["left"], work["top"])
-            area = QRect(tl, br)
-        else:
-            area = QGuiApplication.primaryScreen().availableGeometry()
+    def _place(self) -> None:
+        screen = screen_under_mouse()
+        if not screen:
+            return
+        area = screen.availableGeometry()
         x = area.right() - self.width() - 24
         y = area.bottom() - self.height() - 24
         self.move(max(area.left(), x), max(area.top(), y))
@@ -609,12 +612,11 @@ class Toast(QWidget):
         self.label.adjustSize()
         self.resize(self.label.width() + 50, max(44, self.label.height() + 22))
         self.label.move(34, (self.height() - self.label.height()) // 2)
-        area = QGuiApplication.primaryScreen().availableGeometry()
-        if work:
-            tl = logical_point_for_physical(work["left"], work["top"])
-            br = logical_point_for_physical(work["left"] + work["width"] - 1, work["top"] + work["height"] - 1)
-            area = QRect(tl, br)
-        self.move(area.right() - self.width() - 20, area.bottom() - self.height() - 20)
+        screen = screen_under_mouse()
+        if screen:
+            area = screen.availableGeometry()
+            self.move(max(area.left(), area.right() - self.width() - 20),
+                      max(area.top(), area.bottom() - self.height() - 20))
         self.show()
         win32.exclude_from_capture(int(self.winId()))
         self.update()

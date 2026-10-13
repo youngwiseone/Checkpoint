@@ -295,7 +295,7 @@ class DesktopHost:
                 return
             self.note_window._close()
         a = self.core.sessions.active
-        self.overlay.toggle(a.project_id if a else get_settings().last_project_id, payload.get("work_rect"))
+        self.overlay.toggle(a.project_id if a else get_settings().last_project_id)
 
     def _quick_start(self, project_id: Optional[str] = None) -> None:
         try:
