@@ -85,6 +85,10 @@ def control_icon(kind, color=None, active=False):
         painter.drawPolygon(QPolygonF([QPointF(4, 20), QPointF(5, 16), QPointF(8, 19)]))
         painter.setPen(QPen(c.surface_2, 1.5))
         painter.drawLine(13, 7, 17, 11)
+    elif kind == 'copy':
+        painter.drawRoundedRect(QRectF(3, 3, 13, 13), 2, 2)
+        painter.setBrush(c.surface_2)
+        painter.drawRoundedRect(QRectF(8, 8, 13, 13), 2, 2)
     elif kind == 'folder':
         painter.setPen(QPen(c.accent_strong, 1))
         painter.setBrush(c.accent)

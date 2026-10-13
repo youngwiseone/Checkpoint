@@ -45,7 +45,7 @@ In the note window, type or click **Dictate note**, then **Save**. Double-tap **
 
 To capture what you're saying as you test, choose your microphone and/or computer audio in **Settings → Audio**, then click the circular record button beside Settings in review, or start recording from the tray. The button turns red while recording; click it again to stop. With transcription enabled, nearby speech is added to your screenshots automatically. Recording is optional.
 
-In review, the task text stays visible in a frosted caption along the bottom of each screenshot card. Click its pencil button to edit notes or screenshots, drag a task **up to mark Done**, or **down to delete**. Deleted tasks can be reopened.
+In review, the task text stays visible in a frosted caption along the bottom of each screenshot card. Click the copy button beside the pencil to copy the full task PNG, then paste it into your chat. With multiple tasks selected, it copies all selected PNG files. Click the pencil to edit notes or screenshots, drag a task **up to mark Done**, or **down to delete**. Deleted tasks can be reopened.
 
 Hold **Shift** while clicking a card or pressing **← / →** to select a range. Hold **Ctrl** and click to add or remove individual cards. Drag a selected card up or down to finish or delete the whole selection; **Undo** restores the group. Shift-click **Oldest** or **Newest** to select through that end of the deck.
 

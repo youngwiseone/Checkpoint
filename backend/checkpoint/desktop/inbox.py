@@ -36,6 +36,7 @@ class ProjectPicker(QComboBox):
 
 class InboxPanel(QFrame):
     preview_ready = Signal(object, QImage)
+    copy_ready = Signal(object, str)
     def __init__(self, open_ui=None, open_settings=None, recording=None, recording_status=None, processing_status=None, new_session=None):
         super().__init__()
         self.open_ui, self.open_settings, self.recording = open_ui, open_settings, recording
@@ -57,6 +58,7 @@ class InboxPanel(QFrame):
         self._preview_pending = set()
         self._preview_workers = ThreadPoolExecutor(max_workers=2, thread_name_prefix='previews')
         self.preview_ready.connect(self._preview_loaded)
+        self.copy_ready.connect(self._images_copied)
         self._session_signature = None
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -133,6 +135,7 @@ class InboxPanel(QFrame):
         self.deck.select_cards.connect(self._select_cards)
         self.deck.prepare_group_drag.connect(self._prepare_group_drag)
         self.deck.expand.connect(lambda: self._open(self.selected_id))
+        self.deck.copy_images.connect(self._copy_images)
         from .playback import VoicePlayback
         self.voice_playback = VoicePlayback(self.deck.play_button, self._notify)
         self.deck.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -521,6 +524,39 @@ class InboxPanel(QFrame):
         self.selected_id = None
         self._clear_selection()
         self.refresh()
+
+    def _copy_images(self):
+        if self.deck.copying:
+            return
+        ids = [item['id'] for item in self.items if item['id'] in self.selection]
+        if not ids:
+            return
+        self.deck.copying = True
+        self.deck._place_buttons()
+        self._notify('Copying task image…' if len(ids) == 1 else f'Copying {len(ids)} task images…')
+        self._preview_workers.submit(self._prepare_copy, ids)
+
+    def _prepare_copy(self, ids):
+        from .clipboard import task_image_files
+        try:
+            files = task_image_files(ids)
+        except Exception as error:
+            self.copy_ready.emit(None, str(error))
+        else:
+            self.copy_ready.emit(files, '')
+
+    def _images_copied(self, files, error):
+        from .clipboard import copy_image_files
+        self.deck.copying = False
+        self.deck._place_buttons()
+        if error:
+            self._notify(f'Could not copy task images: {error}')
+            return
+        try:
+            copy_image_files(files)
+            self._notify('Task image copied.' if len(files) == 1 else f'{len(files)} task images copied.')
+        except (OSError, ValueError, RuntimeError) as error:
+            self._notify(f'Could not copy task images: {error}')
 
     def _images(self):
         from ..services.image_cards import refresh, output_folder
