@@ -8,7 +8,7 @@ import numpy as np
 from .devices import PA_LOCK, ComScope, _pa_module, find_device
 
 
-def transcribe_pcm(data: bytes, channels: int, rate: int) -> str:
+def transcribe_pcm(data: bytes, channels: int, rate: int, *, initial_prompt=None, details=None) -> str:
     import av
     from ..transcription.engine import WhistleEngine
 
@@ -22,7 +22,10 @@ def transcribe_pcm(data: bytes, channels: int, rate: int) -> str:
     audio = np.clip(np.concatenate([f.to_ndarray().reshape(-1) for f in frames]), -1, 1)
     engine = WhistleEngine()
     engine.ensure("whistle", "cpu", "int8", 2)
-    return " ".join(s["text"] for s in engine.transcribe(audio)).strip()
+    segments = engine.transcribe(audio, initial_prompt=initial_prompt)
+    if details is not None:
+        details.extend(segments)
+    return " ".join(s["text"] for s in segments).strip()
 
 
 class NoteDictation:
@@ -35,6 +38,10 @@ class NoteDictation:
         self.text = ""
         self.error = ""
         self.thread = None
+        self.audio = b''
+        self.words = []
+        self.project_id = None
+        self.retained_note_id = None
 
     def start(self):
         self.thread = threading.Thread(target=self._run, daemon=True, name="note-dictation")
@@ -91,8 +98,23 @@ class NoteDictation:
                             if p is not None:
                                 p.terminate()
             if not self.cancelled.is_set():
+                import io
+                import wave
+                buffer = io.BytesIO()
+                with wave.open(buffer, 'wb') as wav:
+                    wav.setnchannels(channels)
+                    wav.setsampwidth(2)
+                    wav.setframerate(rate)
+                    wav.writeframes(b''.join(blocks))
+                self.audio = buffer.getvalue()
                 self.phase = "transcribing"
-                self.text = transcribe_pcm(b"".join(blocks), channels, rate)
+                from ..db import read_session
+                from ..models import Project
+                from ..settings_store import get_settings
+                with read_session() as s:
+                    project = s.get(Project, self.project_id or get_settings().last_project_id) if (self.project_id or get_settings().last_project_id) else None
+                    glossary = project.glossary if project else None
+                self.text = transcribe_pcm(b"".join(blocks), channels, rate, initial_prompt=glossary, details=self.words)
         except Exception as error:
             self.error = str(error)
         finally:

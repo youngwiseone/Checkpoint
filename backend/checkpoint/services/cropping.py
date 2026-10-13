@@ -52,9 +52,12 @@ def crop(capture_id: str, box: tuple[int, int, int, int] | None, *, highlight: b
         atomic_write_bytes(media_path(thumb_rel), thumb.getvalue())
         c.image_rel_path, c.thumb_rel_path = image_rel, thumb_rel
         c.width, c.height, c.sha256 = width, height, sha256_bytes(png.getvalue())
+        if not highlight:
+            c.monitor = {**(c.monitor or {}), 'cropped': box is not None or c.trigger == 'snip'}
         linked_ids = s.scalars(select(EvidenceLink.work_item_id).where(EvidenceLink.capture_id == c.id, EvidenceLink.work_item_id.is_not(None))).all()
         for iid in linked_ids:
             item = s.get(WorkItem, iid)
             if item is not None:
                 item.human_updated_at = utcnow()
+                item.version += 1
         return {"id": c.id, "width": width, "height": height, "revision": revision}

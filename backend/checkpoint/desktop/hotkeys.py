@@ -149,13 +149,16 @@ class HotkeyThread:
                         if action == "capture":
                             from .gestures import resolve_press
                             vk = self._keys[int(msg.wParam)]
+                            pressed_at = time.monotonic()
+                            self.on_action('press')
                             resolved = resolve_press(lambda: bool(user32.GetAsyncKeyState(vk) & 0x8000),
-                                                     self._stop.wait, time.monotonic, self._stop.is_set)
+                                                     self._stop.wait, time.monotonic, self._stop.is_set, started=pressed_at)
                             if resolved:
                                 self.on_action(resolved)
-                            if resolved == "review":
+                            if resolved == "hold":
                                 while user32.GetAsyncKeyState(vk) & 0x8000 and not self._stop.wait(.01):
                                     pass
+                                self.on_action('release')
                         else:
                             self.on_action(action)
                     except Exception:  # noqa: BLE001

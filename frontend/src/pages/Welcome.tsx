@@ -57,7 +57,7 @@ export default function Welcome() {
           <p className="tag">Capture the moment. Keep the context. Turn it into action.</p>
         </div>
         <p className="text-2">
-          Start a session, press <kbd>F8</kbd> to grab a screenshot of what you're looking at, <kbd>F9</kbd> for a quick text note,
+          Start a session, press <kbd>F9</kbd> to grab a screenshot, double-tap to edit, triple-tap to review, or hold to dictate,
           and review everything as tidy cards afterwards. Microphone, computer audio and transcription are all optional —
           screenshots and notes always work, offline, on this PC.
         </p>

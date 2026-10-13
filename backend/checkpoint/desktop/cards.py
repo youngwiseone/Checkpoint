@@ -39,6 +39,13 @@ class TaskDeck(QWidget):
         self.edit_button.setToolTip('Edit task and screenshot')
         self.edit_button.clicked.connect(self.expand.emit)
         self.edit_button.hide()
+        self.play_button = QPushButton(self)
+        self.play_button.setObjectName('glassCircle')
+        self.play_button.setFixedSize(44, 44)
+        self.play_button.setIcon(control_icon('play'))
+        self.play_button.setAccessibleName('Play voice note')
+        self.play_button.setToolTip('Play voice note')
+        self.play_button.hide()
         self._caption_previews = OrderedDict()
         self.item = None
         self.image = QPixmap()
@@ -331,6 +338,9 @@ class TaskDeck(QWidget):
         self.edit_button.move(int(rect.right() - 52), int(rect.top() + 8))
         self.edit_button.setVisible(bool(self.item) and self.press is None)
         self.edit_button.raise_()
+        self.play_button.move(int(rect.right() - 104), int(rect.top() + 8))
+        self.play_button.setVisible(bool(self.item) and self.press is None and any(e.get('audio_url') for e in (self.item or {}).get('evidence', [])))
+        self.play_button.raise_()
 
     def resizeEvent(self, event):
         self._place_buttons()

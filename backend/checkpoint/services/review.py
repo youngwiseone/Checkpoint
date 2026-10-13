@@ -13,6 +13,7 @@ from ..models import (
     ITEM_TYPES,
     WORK_STATUSES,
     AudioSource,
+    AudioChunk,
     Capture,
     ChecklistEntry,
     DraftItem,
@@ -48,7 +49,8 @@ def evidence_payload(s, links: Iterable[EvidenceLink]) -> list[dict]:  # noqa: A
                 continue
             out.append({**base, "kind": "capture", "capture_id": c.id, "offset_ms": c.offset_ms, "taken_at": _iso(c.taken_at),
                         "thumb_url": f"/api/media/captures/{c.id}/thumb?v={c.sha256}", "image_url": f"/api/media/captures/{c.id}/image?v={c.sha256}",
-                        "window_title": c.window_title, "width": c.width, "height": c.height, "reason": c.reason})
+                        "window_title": c.window_title, "width": c.width, "height": c.height, "reason": c.reason,
+                        "focus": None if (c.monitor or {}).get('cropped') else (c.monitor or {}).get('focus')})
         elif link.segment_id:
             seg = s.get(TranscriptSegment, link.segment_id)
             if seg is None:
@@ -56,16 +58,24 @@ def evidence_payload(s, links: Iterable[EvidenceLink]) -> list[dict]:  # noqa: A
             if seg.source_id not in labels:
                 src = s.get(AudioSource, seg.source_id)
                 labels[seg.source_id] = (src.label if src and src.label else ("Microphone" if src and src.kind == "mic" else "Computer audio"))
+            from ..storage import audio_path
+            chunk = s.get(AudioChunk, seg.chunk_id) if seg.chunk_id else None
+            available = chunk and chunk.state not in ('deleted', 'missing') and audio_path(chunk.rel_path).is_file()
             out.append({**base, "kind": "segment", "segment_id": seg.id, "offset_ms": seg.start_ms, "end_ms": seg.end_ms,
+                        'chunk_id': seg.chunk_id, 'source_id': seg.source_id,
                         "text": seg.corrected_text or seg.text, "raw_text": seg.text, "corrected": seg.corrected_text is not None,
                         "source_label": labels[seg.source_id], "low_confidence": seg.low_confidence,
-                        "audio_url": f"/api/segments/{seg.id}/audio" if seg.chunk_id else None})
+                        "audio_url": f"/api/segments/{seg.id}/audio" if available else None})
         elif link.note_id:
             n = s.get(Note, link.note_id)
             if n is None:
                 continue
+            from ..storage import audio_path
             out.append({**base, "kind": "note", "note_id": n.id, "offset_ms": n.offset_ms, "text": n.text, "note_kind": n.kind,
-                        "capture_id": n.capture_id})
+                        "capture_id": n.capture_id,
+                        'speech_words': n.speech_words,
+                        'low_confidence': any(word.get('low') for word in (n.speech_words or [])),
+                        "audio_url": f"/api/notes/{n.id}/audio" if n.audio_rel_path and audio_path(n.audio_rel_path).is_file() else None})
     out.sort(key=lambda e: (e.get("offset_ms") is None, e.get("offset_ms") or 0))
     return out
 
@@ -107,6 +117,7 @@ def work_item_dict(s, w: WorkItem, with_evidence: bool = False) -> dict:  # noqa
     links = s.scalars(select(EvidenceLink).where(EvidenceLink.work_item_id == w.id)).all()
     out["human_updated_at"] = _iso(w.human_updated_at)
     out["description_edited"] = w.description_edited
+    out['feedback_reason'] = w.feedback_reason
     out["capture_count"] = sum(1 for l in links if l.capture_id)
     if with_evidence:
         out["evidence"] = evidence_payload(s, links)
@@ -425,7 +436,7 @@ def review_counts(project_id: Optional[str] = None) -> dict:
 def list_work_items(project_id: Optional[str] = None, q: str = "", types: list[str] | None = None,
                     statuses: list[str] | None = None, session_id: Optional[str] = None) -> list[dict]:
     with read_session() as s:
-        stmt = select(WorkItem)
+        stmt = select(WorkItem).where(WorkItem.duplicate_of_id.is_(None))
         if project_id:
             stmt = stmt.where(WorkItem.project_id == project_id)
         if types:

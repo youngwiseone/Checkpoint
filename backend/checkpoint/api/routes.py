@@ -821,6 +821,15 @@ def segment_audio(seg_id: str, pad_ms: int = 700) -> Response:
     return Response(buf.getvalue(), media_type="audio/wav", headers={"Cache-Control": "private, max-age=3600"})
 
 
+@router.get('/notes/{note_id}/audio')
+def note_audio(note_id: str) -> Response:
+    from ..services.voice import evidence_audio
+    try:
+        return Response(evidence_audio({'kind': 'note', 'note_id': note_id}), media_type='audio/wav')
+    except (ValueError, OSError) as error:
+        raise HTTPException(410, str(error)) from error
+
+
 # ================================================================== drafts (review cards)
 class DraftPatch(BaseModel):
     type: Optional[str] = None

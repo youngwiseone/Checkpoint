@@ -22,7 +22,6 @@ from .export import _collect
 
 WIDTH = 1200
 LINE_HEIGHT = 34
-LINES_PER_PAGE = 24
 _cache: dict[str, tuple[str, tuple[Path, ...]]] = {}
 _lock = RLock()
 
@@ -69,6 +68,11 @@ def context_text(item: dict) -> str:
     body = visible_context(item)
     if body:
         parts.extend(['', body])
+    for index, screenshot in enumerate(item.get('screenshots', []), 1):
+        focus = screenshot.get('focus')
+        if focus:
+            parts.append(f"Image {index}: original {screenshot.get('width')} × {screenshot.get('height')} px; "
+                         f"cursor x/y: {focus.get('cursor')}; center x/y: {focus.get('center')} (original image pixels).")
     return '\n'.join(parts)
 
 
@@ -107,44 +111,42 @@ def _export_item(item: dict) -> dict:
     return result
 
 
-def render_cards(item: dict, screenshot: Path | None = None, caption: str = '') -> list[bytes]:
+def render_cards(item: dict, screenshot: Path | None = None, caption: str = '', *, sources=None) -> list[bytes]:
+    """One task, one PNG: numbered images and all visible text, without pagination."""
     item = _export_item(item)
     text = context_text(item)
     font, small = _font(26), _font(20)
-    lines = _wrap(text, font, WIDTH - 80)
-    pages = [lines[i:i + LINES_PER_PAGE] for i in range(0, len(lines), LINES_PER_PAGE)] or [[]]
-    shot = None
-    if screenshot is not None:
-        with Image.open(screenshot) as source:
-            shot = source.convert('RGB')
-        shot.thumbnail((WIDTH, 850), Image.Resampling.LANCZOS)
-    result = []
-    for page, visible in enumerate(pages, 1):
-        shot_height = shot.height if shot is not None else 0
-        header = 64 if shot is not None else 0
-        panel_y = header + shot_height
-        image = Image.new('RGB', (WIDTH, panel_y + 195 + LINE_HEIGHT * len(visible)), '#f6f7fa')
-        draw = ImageDraw.Draw(image)
-        if shot is not None:
-            draw.text((28, 20), caption or 'Checkpoint screenshot', font=small, fill='#495269')
-            image.paste(shot, ((WIDTH - shot.width) // 2, header))
-        draw.rectangle((0, panel_y, WIDTH, image.height), fill='#ffffff')
-        draw.line((0, panel_y, WIDTH, panel_y), fill='#dbe0e9', width=2)
-        draw.text((40, panel_y + 24), f'CHECKPOINT  /  NOTES  /  {page} of {len(pages)}', font=small, fill='#526585')
-        y = panel_y + 65
-        for line in visible:
-            draw.text((40, y), line, font=font, fill='#1d2738')
-            y += LINE_HEIGHT
-        draw.text((40, y + 16), 'Read the notes above. Original PNG: exact text in Checkpoint.Context iTXt.', font=small, fill='#627189')
-        draw.text((40, y + 44), 'Pillow: Image.open(path).info["Checkpoint.Context"]', font=small, fill='#627189')
-        draw.text((40, y + 72), 'Uploads may drop metadata. Include every page when sharing.', font=small, fill='#627189')
-        metadata = PngImagePlugin.PngInfo()
-        metadata.add_itxt('Checkpoint.Context', text)
-        metadata.add_itxt('Checkpoint.Item', json.dumps({'schema': 1, 'item': item, 'page': page, 'pages': len(pages), 'caption': caption}, ensure_ascii=False))
-        buf = io.BytesIO()
-        image.save(buf, 'PNG', pnginfo=metadata)
-        result.append(buf.getvalue())
-    return result
+    prepared = []
+    for source, label, _ in (sources if sources is not None else [(screenshot, caption, '')]):
+        if source is None:
+            continue
+        with Image.open(source) as original:
+            shot = original.convert('RGB')
+        prepared.append((shot, label))
+    width = max([WIDTH] + [shot.width for shot, _ in prepared])
+    lines = _wrap(text, font, width - 80)
+    panel_y = sum(shot.height + 64 for shot, _ in prepared)
+    image = Image.new('RGB', (width, panel_y + 120 + LINE_HEIGHT * len(lines)), '#f6f7fa')
+    draw = ImageDraw.Draw(image)
+    y = 0
+    for number, (shot, label) in enumerate(prepared, 1):
+        draw.text((28, y + 20), f'Image {number}' + (f' · {label}' if label else ''), font=small, fill='#495269')
+        image.paste(shot, ((width - shot.width) // 2, y + 64))
+        y += shot.height + 64
+    draw.rectangle((0, panel_y, width, image.height), fill='#ffffff')
+    draw.line((0, panel_y, width, panel_y), fill='#dbe0e9', width=2)
+    draw.text((40, panel_y + 24), 'CHECKPOINT / NOTES', font=small, fill='#526585')
+    y = panel_y + 65
+    for line in lines:
+        draw.text((40, y), line, font=font, fill='#1d2738')
+        y += LINE_HEIGHT
+    metadata = PngImagePlugin.PngInfo()
+    metadata.add_itxt('Checkpoint.Context', text)
+    metadata.add_itxt('Checkpoint.Item', json.dumps({'schema': 2, 'item': item, 'page': 1, 'pages': 1,
+        'caption': caption, 'image_count': len(prepared)}, ensure_ascii=False))
+    buffer = io.BytesIO()
+    image.save(buffer, 'PNG', pnginfo=metadata)
+    return [buffer.getvalue()]
 
 
 def _sources(item: dict, include_screenshots: bool):
@@ -163,17 +165,14 @@ def _sources(item: dict, include_screenshots: bool):
 def _write_item(item: dict, folder: Path, include_screenshots: bool = True) -> str:
     item = _export_item(item)
     sources = _sources(item, include_screenshots)
-    signature = hashlib.sha256((json.dumps(item, sort_keys=True, ensure_ascii=False) + str([(str(p), sha) for p, _, sha in sources])).encode()).hexdigest()
+    signature = hashlib.sha256(('composite-v2' + json.dumps(item, sort_keys=True, ensure_ascii=False) + str([(str(p), sha) for p, _, sha in sources])).encode()).hexdigest()
     key = str(folder / item['id'])
     cached = _cache.get(key)
     if cached and cached[0] == signature and all(path.is_file() for path in cached[1]):
         return signature
-    written = set()
-    for number, (source, caption, _) in enumerate(sources, 1):
-        for page, data in enumerate(render_cards(item, source, caption), 1):
-            target = folder / f"{item['id']}-{number:02d}-{page:03d}.png"
-            atomic_write_bytes(target, data)
-            written.add(target)
+    target = folder / f"{item['id']}-01-001.png"
+    atomic_write_bytes(target, render_cards(item, sources=sources)[0])
+    written = {target}
     for old in folder.glob(f"{item['id']}-*.png"):
         if old not in written:
             old.unlink()
@@ -191,7 +190,7 @@ def refresh() -> Path:
     """Write destination cards before removing previous project/status copies."""
     root = output_folder()
     with read_session() as session:
-        ids = list(session.scalars(select(WorkItem.id)).all())
+        ids = list(session.scalars(select(WorkItem.id).where(WorkItem.duplicate_of_id.is_(None))).all())
     items, _ = _collect(ids, True)
     successful: dict[str, Path] = {}
     for item in items:

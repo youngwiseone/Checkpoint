@@ -231,6 +231,9 @@ def items_markdown(items: list[dict], images: dict[str, str], heading: str = "")
         for sc in shots:
             note = "" if sc["confidence"] == "direct" else " (possibly related: taken near this remark)"
             lines.append(f"Screenshot {images[sc['id']]} at {sc['offset']}{note}")
+            if sc.get('focus'):
+                lines.append(f"Original image {sc['width']} × {sc['height']} px; cursor x/y: {sc['focus']['cursor']}; "
+                             f"center x/y: {sc['focus']['center']} (original image pixels).")
         if shots:
             lines.append("")
     return "\n".join(lines).strip() + "\n"

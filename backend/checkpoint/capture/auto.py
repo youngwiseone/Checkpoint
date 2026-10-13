@@ -28,14 +28,14 @@ from sqlalchemy import select
 
 from ..db import read_session
 from ..events import notices
-from ..models import Capture, TranscriptSegment
+from ..models import AudioSource, Capture, TranscriptSegment
 from ..settings_store import get_settings
 from ..workers import HEAVY_LOCK, Worker
 
 log = logging.getLogger(__name__)
 
 # Short and specific works best for the small decision models (tev1:0.8b scored 10/10 on a sample set with this).
-QUESTION = "Is the speaker pointing out a bug, glitch or problem they can see on screen?"
+QUESTION = "Is the speaker reporting an actual bug, glitch or problem they just observed on screen, rather than speculating or asking a question?"
 MIN_WORDS = 3
 MANUAL_NEARBY_S = 20  # a hotkey screenshot this close already covers the moment
 # Whisper invents these on silence or music; they're never about the screen.
@@ -52,6 +52,19 @@ def sentences(text: str) -> list[tuple[int, str]]:
     """(start character, sentence) for sentences long enough to judge on their own."""
     return [(m.start() + len(m.group()) - len(m.group().lstrip()), m.group().strip())
             for m in _SENTENCE.finditer(text) if len(m.group().split()) >= MIN_WORDS]
+
+
+def utterances(segments):
+    """Whistle stores individual words; judge completed speech groups, not isolated words."""
+    groups = []
+    for g in segments:
+        if (not groups or not g.chunk_id or groups[-1][-1].chunk_id != g.chunk_id
+                or g.start_ms - groups[-1][-1].end_ms > 2000):
+            groups.append([])
+        groups[-1].append(g)
+    return [(group[-1].id, group[0].start_ms, group[-1].end_ms,
+             ' '.join((g.corrected_text or g.text).strip() for g in group),
+             sum(g.low_confidence for g in group) / len(group) >= .3) for group in groups]
 
 
 class FrameBuffer:
@@ -187,10 +200,11 @@ class AutoCaptureWorker(Worker):
         with read_session() as s:
             segs = s.scalars(
                 select(TranscriptSegment)
-                .where(TranscriptSegment.session_id == a.id, TranscriptSegment.start_ms >= a.clock.offset_ms(oldest))
+                .join(AudioSource, AudioSource.id == TranscriptSegment.source_id)
+                .where(TranscriptSegment.session_id == a.id, AudioSource.kind == 'mic', TranscriptSegment.start_ms >= a.clock.offset_ms(oldest))
                 .order_by(TranscriptSegment.start_ms)
             ).all()
-            rows = [(g.id, g.start_ms, g.end_ms, (g.corrected_text or g.text).strip(), g.low_confidence) for g in segs]
+            rows = utterances(segs)
         for seg_id, start_ms, end_ms, text, low in rows:
             if seg_id in self.seen:
                 continue
@@ -235,6 +249,9 @@ class AutoCaptureWorker(Worker):
         mono = time.monotonic() - (a.clock.offset_ms() - at_ms) / 1000
         frame = self.frames.nearest(mono, max(3.0, cfg.frame_interval_s * 1.5))
         if frame is None:
+            return
+        from ..services.automatic import suppressed
+        if suppressed(a.project_id, a.id, sentence, frame.fg.title if frame.fg else ''):
             return
         try:
             self.capture.auto_capture(frame, reason=sentence)

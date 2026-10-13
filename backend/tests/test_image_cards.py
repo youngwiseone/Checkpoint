@@ -12,14 +12,14 @@ def test_long_unicode_context_visible_and_lossless(tmp_path):
     shot = tmp_path / 'shot.png'
     Image.new('RGB', (500, 300), '#234567').save(shot)
     cards = render_cards(item, shot)
-    assert len(cards) > 1
+    assert len(cards) == 1
     for number, data in enumerate(cards, 1):
         with Image.open(io.BytesIO(data)) as image:
             assert image.info['Checkpoint.Context'] == context_text(item)
             metadata = json.loads(image.info['Checkpoint.Item'])
             assert metadata['page'] == number and metadata['pages'] == len(cards)
             assert metadata['item']['description'] == text
-            assert image.height <= 64 + 300 + 195 + 24 * 34
+            assert image.height > 64 + 300 + 195 + 24 * 34
     wrapped = _wrap(context_text(item), _font(26), 1120)
     assert ''.join(wrapped).replace('\n', '') == context_text(item).replace('\n', '')
     assert wrapped[-1] == 'LAST LINE stays visible.'
@@ -72,7 +72,7 @@ def test_missing_continuation_page_is_restored(app_env):
         session.add(item)
     folder = image_cards.refresh()
     files = sorted(folder.rglob('*.png'))
-    assert len(files) > 1
+    assert len(files) == 1
     missing = files[-1]
     original = missing.read_bytes()
     missing.unlink()

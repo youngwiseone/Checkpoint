@@ -214,3 +214,18 @@ def test_old_default_settings_are_upgraded(app_env):
     invalidate_cache()
     ac = get_settings().auto_capture
     assert (ac.enabled, ac.threshold, ac.cooldown_s, ac.max_per_session) == (False, 0.7, 45, 25)
+
+
+def test_computer_audio_cannot_trigger_automatic_tasks(app_env, monkeypatch):
+    from checkpoint.db import write_session
+    from checkpoint.models import AudioSource
+    sm, worker, sid, _, now = _setup(monkeypatch)
+    with write_session() as session:
+        source = AudioSource(session_id=sid, kind='loopback', label='Game dialogue')
+        session.add(source); session.flush()
+        source_id = source.id
+    _segment(sid, source_id, sm.active.clock.offset_ms(now - 20), 'That is a bug on screen')
+    worker.decide = lambda text: True
+    worker.step()
+    assert _auto_caps(sid) == []
+    sm.end()

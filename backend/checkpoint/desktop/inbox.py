@@ -132,6 +132,8 @@ class InboxPanel(QFrame):
         self.deck.select_cards.connect(self._select_cards)
         self.deck.prepare_group_drag.connect(self._prepare_group_drag)
         self.deck.expand.connect(lambda: self._open(self.selected_id))
+        from .playback import VoicePlayback
+        self.voice_playback = VoicePlayback(self.deck.play_button, self._notify)
         self.deck.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.deck.customContextMenuRequested.connect(self._task_menu)
         layout.addWidget(self.deck, 1)
@@ -664,6 +666,10 @@ class InboxPanel(QFrame):
         ids = [item['id'] for item in self.items]
         index = ids.index(self.selected_id) if self.selected_id in ids else 0
         item = self._detail(self.items[index]) if ids else None
+        if getattr(self, '_voice_item', None) != (item or {}).get('id'):
+            self.voice_playback.stop()
+        self._voice_item = (item or {}).get('id')
+        self.voice_playback.set_evidence((item or {}).get('evidence', []))
         behind = []
         for relative in (-4, -3, -2, -1, 1, 2, 3, 4):
             neighbour = index + relative
@@ -839,15 +845,36 @@ class InboxPanel(QFrame):
         menu.addAction('Mark done', lambda: self._status('done'))
         menu.addAction('Reopen', lambda: self._status('open'))
         menu.addAction('Move to Deleted', lambda: self._status('deleted'))
+        menu.addSeparator()
+        menu.addAction('Expected behaviour · ignore repeats this session', lambda: self._feedback('expected'))
+        menu.addAction('Misheard', lambda: self._feedback('misheard'))
+        menu.addAction('Add to last task', self._bundle_previous)
         with self._child_window():
             menu.exec(self.deck.mapToGlobal(point))
 
     def hideEvent(self, event):
+        self.voice_playback.stop()
         self._remember_selection()
         self.timer.stop()
         self.notice_timer.stop()
         self.deactivate_timer.stop()
         super().hideEvent(event)
+
+    def _feedback(self, reason):
+        from ..services.task_evidence import feedback
+        try:
+            feedback(self.selected_id, reason)
+            self.refresh()
+        except ValueError as error:
+            self._notify(str(error))
+
+    def _bundle_previous(self):
+        from ..services.task_evidence import bundle_previous
+        try:
+            self.selected_id = bundle_previous(self.selected_id)
+            self.refresh()
+        except ValueError as error:
+            self._notify(str(error))
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

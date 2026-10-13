@@ -155,7 +155,7 @@ export default function Items() {
       <button key={v} className={`tab ${tab === v ? "active" : ""}`} role="tab" aria-selected={tab === v} onClick={() => setTab(v)}>{label}</button>)}</div>
     <div className="row" style={{ marginBottom: 16 }}><Search size={16} /><input className="input" aria-label="Search inbox" placeholder="Search captures and notes" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
     {items.isLoading ? <Spinner /> : items.error ? <p role="alert">{(items.error as Error).message}</p> : !items.data?.length ?
-      <Empty title="Nothing here yet">Tap your capture key to save a screenshot, double tap to add text, or add a note above.</Empty> :
+      <Empty title="Nothing here yet">Tap your capture key to save a screenshot, double tap to edit, hold to dictate, or add a note above.</Empty> :
       <div className="stack">{items.data.map((i) => <div className="card row" key={i.id}>
         {i.thumb_url ? <img src={i.thumb_url} className="thumb" alt="Screenshot" style={{ width: 120, height: 76 }} onClick={() => setOpen(i.id)} /> : <ImageIcon size={20} className="muted" />}
         <button className="btn ghost grow" style={{ textAlign: "left", justifyContent: "flex-start", whiteSpace: "normal" }} onClick={() => setOpen(i.id)}>

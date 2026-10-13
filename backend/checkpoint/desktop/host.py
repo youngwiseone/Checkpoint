@@ -60,6 +60,8 @@ class Bridge(QObject):
     toast_requested = Signal(str, str, object)
     state_changed = Signal()
     review_requested = Signal(dict)
+    held_note = Signal(object)
+    setup_requested = Signal(str)
 
 
 class DesktopHost:
@@ -70,7 +72,7 @@ class DesktopHost:
         self.show_panel = show_panel
         self.core = get_core()
         self.bridge = Bridge()
-        self.note_window = NoteWindow(self._save_note, self._keep_capture, self._discard_capture)
+        self.note_window = NoteWindow(self._save_note, self._keep_capture, self._discard_capture, self._menu_from_note)
         self.toast = Toast()
         self.overlay = InboxPanel(open_settings=self.open_settings, recording=self._record_from_panel,
                                   recording_status=self.core.sessions.status,
@@ -81,6 +83,12 @@ class DesktopHost:
         self.bridge.toast_requested.connect(lambda lvl, msg, work: self.toast.show_message(lvl, msg, work))
         self.bridge.state_changed.connect(self._refresh_tray)
         self.capture_button = CaptureButton()
+        self._prepared_press = None
+        self._press_recording = None
+        self._held_jobs = []
+        self.bridge.held_note.connect(self._track_held_note)
+        self.bridge.setup_requested.connect(self._prompt_voice_setup)
+        self.held_timer = QTimer(self.bridge, interval=100, timeout=self._poll_held_notes)
         self.hotkeys = None
         self.local_server = QLocalServer()
         self._quitting = False
@@ -127,40 +135,157 @@ class DesktopHost:
         self.hotkeys.rebind()
         return self.hotkeys.summary()
 
+    def _latest_note(self):
+        from ..services.task_evidence import last_editor_payload
+        active = self.core.sessions.active
+        pid = active.project_id if active else get_settings().last_project_id
+        payload = last_editor_payload(pid) if pid else None
+        if not payload:
+            self.capture_button.previous = None
+        return payload
+
     def _on_hotkey(self, action: str) -> None:
-        """Runs on the hotkey thread. Capture first, UI after."""
-        if action == "review":
+        """Hotkey thread: freeze the initial frame and record until release."""
+        if action == 'review':
             self.capture_button.clear()
             self._overlay_hotkey(action)
             return
-        if self.note_window.isVisible():
-            # Never capture our own popup; ask the user to finish the open note.
-            hooks.emit_toast("warning", "Finish or press Esc on the open note first.")
-            return
-        if self.overlay.isVisible() or self.app.activeModalWidget() is not None:
-            hooks.emit_toast("warning", "Close the open Checkpoint popup before capturing.")
-            return
-        cap = self.core.capture
-        if action == "capture":
-            active = self.core.sessions.active
-            has_audio = bool(
-                active
-                and self.core.sessions.audio_functioning()
-                and any(
-                    status["state"] in ("recording", "idle")
-                    and status["receiving"]
-                    and status["signal_recent"]
-                    for recorder in active.recorders.values()
-                    for status in (recorder.status(),)
-                )
-            )
-            if not has_audio:
-                self.capture_button.clear()
-                cap.hotkey_capture(ask_context=True, reason="no_audio")
+        if action == 'press':
+            self._prepared_press = None
+            self._press_recording = None
+            if self.note_window.isVisible() or self.overlay.isVisible() or self.app.activeModalWidget() is not None:
                 return
-            self.capture_button.tap(lambda: cap.hotkey_capture(ask_context=False),
-                                    self.bridge.note_requested.emit, time.monotonic)
+            from ..capture import screen
+            from datetime import datetime, timezone
+            active = self.core.sessions.active
+            mic_recorder = active.recorders.get('mic') if active else None
+            if get_settings().audio.mic_enabled or mic_recorder:
+                from ..audio.dictation import NoteDictation
+                self._press_recording = NoteDictation(getattr(mic_recorder, 'device_name', get_settings().audio.mic_device))
+                self._press_recording.project_id = active.project_id if active else get_settings().last_project_id
+                self._press_recording.start()
+            mono, taken = time.monotonic(), datetime.now(timezone.utc)
+            try:
+                self._prepared_press = (screen.grab(active.capture_target if active else 'foreground', get_settings().capture.region), mono, taken)
+            except Exception as error:
+                hooks.emit_toast('error', f'Screenshot failed: {error}')
             return
+        if action == 'release':
+            if self._press_recording:
+                self._press_recording.stop()
+                self._press_recording = None
+            return
+        if action == 'hold':
+            self.capture_button.clear()
+            prepared = self._prepared_press
+            self._prepared_press = None
+            if not prepared:
+                if self._press_recording:
+                    self._press_recording.cancel()
+                return
+            payload = self.core.capture.hotkey_capture(False, prepared=prepared, quiet=True)
+            if not payload:
+                if self._press_recording:
+                    self._press_recording.cancel()
+                return
+            self.capture_button.previous = payload
+            recording = self._press_recording
+            if recording:
+                self.bridge.held_note.emit((payload, recording))
+                hooks.emit_toast('info', 'Listening… release the capture key to save your voice note.', payload.get('work_rect'),)
+            else:
+                self.bridge.note_requested.emit(payload)
+                self.bridge.setup_requested.emit('Audio')
+            return
+        if action == 'capture':
+            if getattr(self, '_press_recording', None):
+                self._press_recording.cancel()
+                self._press_recording = None
+            prepared = getattr(self, '_prepared_press', None)
+            self._prepared_press = None
+            def grab():
+                if self.note_window.isVisible() or self.overlay.isVisible() or self.app.activeModalWidget() is not None:
+                    return None
+                active = self.core.sessions.active
+                has_audio = bool(active and self.core.sessions.audio_functioning() and any(
+                    st['state'] in ('recording', 'idle') and st['receiving'] and st['signal_recent']
+                    for recorder in active.recorders.values() for st in (recorder.status(),)))
+                return self.core.capture.hotkey_capture(ask_context=not has_audio,
+                    reason=None if has_audio else 'no_audio', **({'prepared': prepared} if prepared else {}))
+            self.capture_button.tap(grab, self.bridge.note_requested.emit, time.monotonic,
+                                    review=lambda: self._overlay_hotkey('review'), latest=self._latest_note)
+
+    def _track_held_note(self, job):
+        self._held_jobs.append(job)
+        self.held_timer.start()
+
+    def _poll_held_notes(self):
+        for payload, recording in list(self._held_jobs):
+            from ..services.voice import retain, finish_note
+            if recording.audio and not recording.retained_note_id:
+                try:
+                    recording.retained_note_id = retain(payload['id'], recording.audio)
+                except (ValueError, OSError) as error:
+                    hooks.emit_toast('error', f'Could not retain voice recording: {error}')
+                    continue
+            if recording.phase != 'done':
+                continue
+            self._held_jobs.remove((payload, recording))
+            try:
+                if recording.retained_note_id:
+                    finish_note(recording.retained_note_id, recording.text, recording.words)
+                if recording.text:
+                    from ..services.task_evidence import capture_editor_payload
+                    current = capture_editor_payload(payload['id'])
+                    from ..services.review import get_work_item
+                    existing = get_work_item(current['item_id'])
+                    text = '\n\n'.join(p for p in (existing['description'] if existing['description_edited'] else '', recording.text) if p)
+                    self.core.capture.save_capture_note(payload['id'], text)
+                    if self.note_window.isVisible() and self.note_window.payload.get('item_id') == current['item_id']:
+                        editor_text = self.note_window.text.toPlainText()
+                        if recording.text not in editor_text:
+                            self.note_window.text.setPlainText('\n\n'.join(p for p in (editor_text, recording.text) if p))
+                        self.note_window._reload_evidence()
+                    hooks.emit_toast('success', 'Voice note saved · double tap to edit.', payload.get('work_rect'))
+                else:
+                    self.bridge.note_requested.emit(payload)
+                    hooks.emit_toast('warning', recording.error or 'No speech detected. Add a note or keep the screenshot.', payload.get('work_rect'))
+                    if recording.error:
+                        from ..transcription.engine import model_installed
+                        self.bridge.setup_requested.emit('Transcript' if not model_installed('whistle') else 'Audio')
+                self.core.inbox.wake()
+            except Exception as error:
+                hooks.emit_toast('error', f'Could not save voice note: {error}')
+                self.bridge.note_requested.emit(payload)
+        if not self._held_jobs:
+            self.held_timer.stop()
+
+    def _prompt_voice_setup(self, tab):
+        from .glass import GlassDialog
+        from PySide6.QtWidgets import QLabel, QPushButton
+        dialog = GlassDialog(self.note_window)
+        dialog.setWindowTitle('Set up voice notes')
+        dialog.resize(420, 180)
+        layout = dialog.content_layout()
+        message = QLabel('Enable your microphone in Audio settings to record while holding the capture key.' if tab == 'Audio'
+                         else 'Your recording is saved. Download the speech model in Transcript settings to turn voice notes into text.')
+        message.setWordWrap(True)
+        layout.addWidget(message)
+        button = QPushButton('Open ' + tab + ' settings')
+        button.clicked.connect(lambda: (dialog.accept(), self.open_settings(tab)))
+        layout.addWidget(button)
+        later = QPushButton('Later')
+        later.clicked.connect(dialog.reject)
+        layout.addWidget(later)
+        dialog.exec()
+
+    def _menu_from_note(self):
+        if self.overlay.isVisible():
+            self.overlay.raise_()
+            self.overlay.activateWindow()
+        else:
+            self._toggle_overlay({})
+
     # ------------------------------------------------------------ review overlay
     def _overlay_hotkey(self, action: str) -> None:
         """Hotkey thread: note what's in the foreground (to infer the project), then show the overlay or switcher."""
@@ -181,8 +306,12 @@ class DesktopHost:
         if self.app.activeModalWidget() is not None:
             return
         if self.note_window.isVisible():
-            hooks.emit_toast("warning", "Finish or press Esc on the open note first.")
-            return
+            if self.note_window._dictation is not None:
+                hooks.emit_toast('info', 'Finish the voice note before opening the menu.')
+                return
+            if not self.note_window._persist_editor():
+                return
+            self.note_window._close()
         a = self.core.sessions.active
         self.overlay.toggle(a.project_id if a else get_settings().last_project_id, payload.get("work_rect"))
 
@@ -239,7 +368,13 @@ class DesktopHost:
 
     def _save_note(self, payload: dict, text: str, category: Optional[str]) -> Optional[str]:
         try:
-            if payload.get("id"):
+            if payload.get('item_id'):
+                from ..services.review import update_work_item
+                update_work_item(payload['item_id'], {'description': text,
+                                                      **({'title': text.splitlines()[0][:300]} if text.strip() else {}),
+                                                      **({'type': category} if category else {})})
+                self.toast.show_message('success', 'Note saved', payload.get('work_rect'))
+            elif payload.get("id"):
                 self.core.capture.save_capture_note(payload["id"], text, category)
                 self.toast.show_message("success", "Saved to inbox" + self._waiting_hint(), payload.get("work_rect"))
             else:
@@ -307,7 +442,7 @@ class DesktopHost:
         st = self.core.sessions.status()
         live = bool(st.get("active"))
         hk = get_settings().hotkeys.review
-        self.act_review.setText(f"Review inbox  ({hk + ', ' if hk else ''}hold capture)")
+        self.act_review.setText(f"Review inbox  ({hk + ', ' if hk else ''}triple tap capture)")
         for a in (self.act_pause, self.act_mic, self.act_loop, self.act_end):
             a.setVisible(live)
         self.act_start.setVisible(not live)
@@ -381,9 +516,14 @@ class DesktopHost:
         else:
             self._toggle_overlay({})
 
-    def open_settings(self):
+    def open_settings(self, tab=None):
         from .settings import SettingsDialog
-        SettingsDialog(self._rebind, self.overlay).exec()
+        dialog = SettingsDialog(self._rebind, self.overlay)
+        if tab:
+            for index in range(dialog.tabs.count()):
+                if dialog.tabs.tabText(index) == tab:
+                    dialog.tabs.setCurrentIndex(index)
+        dialog.exec()
         self.core.transcriber.wake()
         active = self.core.sessions.active
         self.overlay.project_id = active.project_id if active else get_settings().last_project_id
@@ -407,6 +547,16 @@ class DesktopHost:
 
     def shutdown(self) -> None:
         self.capture_button.clear()
+        self.held_timer.stop()
+        if self._press_recording:
+            self._press_recording.cancel()
+        for payload, recording in self._held_jobs:
+            recording.stop()
+            if recording.thread:
+                recording.thread.join(2)
+            if recording.audio and not recording.retained_note_id:
+                from ..services.voice import retain
+                retain(payload['id'], recording.audio, recording.text)
         try:
             if self.hotkeys:
                 self.hotkeys.stop()
@@ -436,7 +586,7 @@ class DesktopHost:
             self.tray.showMessage("Shortcut conflict", msg[:200], QSystemTrayIcon.MessageIcon.Warning, 8000)
         self.app.aboutToQuit.connect(lambda: None if self._quitting else self.shutdown())
         log.info("Desktop host running with native popups")
-        print("Checkpoint is running in the tray. Hold the capture key to review or open Settings.")
+        print("Checkpoint is running in the tray. Triple tap the capture key to review; hold it to dictate a note.")
         if self.show_panel:
             self.open_ui()
         return self.app.exec()

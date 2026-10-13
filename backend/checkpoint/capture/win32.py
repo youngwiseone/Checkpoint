@@ -203,3 +203,13 @@ def current_pid() -> int:
     import os
 
     return os.getpid()
+
+
+def cursor_position():
+    """Physical desktop pixels; None when Windows cannot provide a position."""
+    if not IS_WIN:
+        return None
+    point = wintypes.POINT()
+    if user32.GetCursorPos(ctypes.byref(point)):
+        return point.x, point.y
+    return None

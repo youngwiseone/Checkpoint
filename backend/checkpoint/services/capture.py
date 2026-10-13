@@ -109,16 +109,16 @@ class CaptureService:
             self._last_press[action] = now
             return False
 
-    def hotkey_capture(self, ask_context: bool, reason: Optional[str] = None) -> Optional[dict]:
+    def hotkey_capture(self, ask_context: bool, reason: Optional[str] = None, *, prepared=None, quiet=False, attach_to=None) -> Optional[dict]:
         """Runs on the hotkey thread. Returns the capture payload or None on failure."""
         from ..capture import screen
 
-        mono = time.monotonic()
-        taken_at = datetime.now(timezone.utc)
+        mono = prepared[1] if prepared else time.monotonic()
+        taken_at = prepared[2] if prepared else datetime.now(timezone.utc)
         active = self.sessions.active
         target = active.capture_target if active else "foreground"
         try:
-            g = screen.grab(target, get_settings().capture.region)
+            g = prepared[0] if prepared else screen.grab(target, get_settings().capture.region)
         except Exception as e:  # noqa: BLE001
             log.exception("Screenshot failed")
             msg = f"Screenshot failed: {e}"
@@ -130,7 +130,11 @@ class CaptureService:
         try:
             cap = self._persist(g, taken_at, mono, "hotkey_context" if ask_context else "hotkey", "unfinished" if needs_note else "marker")
             from .inbox import ensure_capture
-            ensure_capture(cap["id"])
+            if attach_to:
+                from .task_evidence import attach_capture
+                attach_capture(attach_to, cap['id'])
+            else:
+                ensure_capture(cap["id"])
         except Exception as e:  # noqa: BLE001
             log.exception("Saving screenshot failed")
             msg = f"The screenshot couldn't be saved: {e}"
@@ -148,14 +152,16 @@ class CaptureService:
             "needs_note": needs_note,
             "reason": reason or ("asked" if (ask_context or settings.capture.always_ask_context or (active and active.always_ask_context)) else "no_audio"),
         }
-        if needs_note:
+        if quiet:
+            pass
+        elif needs_note:
             if hooks.request_note:
                 hooks.request_note(payload)
             else:
                 notices.push("info", "Screenshot saved to Unfinished captures — add context from the app.", "capture")
         else:
             label = fmt_offset(cap["offset_ms"])
-            hint = " · double tap to add a note, hold to review"
+            hint = " · double tap to edit, triple tap to review"
             hooks.emit_toast("success" if not g.warnings else "warning",
                              g.warnings[0] if g.warnings else f"Screenshot saved at {label}{hint}", g.work_rect)
         hooks.emit_state()
@@ -206,16 +212,31 @@ class CaptureService:
                 "taken_at": taken_at.isoformat(), "thumb_rel_path": thumb_rel, "image_rel_path": img_rel}
 
     def import_image(self, png: bytes, thumb: bytes, width: int, height: int, *, project_id: str, session_id: Optional[str],
-                     offset_ms: Optional[int], taken_at: datetime, status: str, trigger: str = "demo") -> str:
+                     offset_ms: Optional[int], taken_at: datetime, status: str, trigger: str = "demo", attach_to=None) -> str:
         cid = new_id()
         folder = session_id or f"project-{project_id}"
         img_rel, thumb_rel = f"{folder}/{cid}.png", f"{folder}/{cid}_thumb.jpg"
         atomic_write_bytes(media_path(img_rel), png)
         atomic_write_bytes(media_path(thumb_rel), thumb)
-        with write_session() as s:
-            s.add(Capture(id=cid, session_id=session_id, project_id=project_id, taken_at=taken_at, offset_ms=offset_ms,
-                          image_rel_path=img_rel, thumb_rel_path=thumb_rel, sha256=sha256_bytes(png), width=width, height=height,
-                          monitor={}, window_title="", trigger=trigger, status=status))
+        try:
+            with write_session() as s:
+                if attach_to:
+                    from ..models import WorkItem
+                    item = s.get(WorkItem, attach_to)
+                    if not item or item.project_id != project_id:
+                        raise ValueError('Task not found in this project')
+                s.add(Capture(id=cid, session_id=session_id, project_id=project_id, taken_at=taken_at, offset_ms=offset_ms,
+                              image_rel_path=img_rel, thumb_rel_path=thumb_rel, sha256=sha256_bytes(png), width=width, height=height,
+                              monitor={'cropped': True} if trigger == 'snip' else {}, window_title="", trigger=trigger, status=status))
+                if attach_to:
+                    s.flush()
+                    s.add(EvidenceLink(work_item_id=attach_to, capture_id=cid, confidence='direct', attached_by='user'))
+                    item.version += 1
+                    item.human_updated_at = datetime.now(timezone.utc)
+        except Exception:
+            media_path(img_rel).unlink(missing_ok=True)
+            media_path(thumb_rel).unlink(missing_ok=True)
+            raise
         return cid
 
     # ------------------------------------------------------------ notes

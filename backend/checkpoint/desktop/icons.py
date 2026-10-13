@@ -17,7 +17,13 @@ def control_icon(kind, color=None, active=False):
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(QPen(ink, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
                         Qt.PenJoinStyle.RoundJoin))
-    if kind == 'close':
+    if kind == 'play':
+        painter.setBrush(ink)
+        painter.drawPolygon(QPolygonF([QPointF(8, 5), QPointF(19, 12), QPointF(8, 19)]))
+    elif kind == 'stop':
+        painter.setBrush(ink)
+        painter.drawRoundedRect(QRectF(6, 6, 12, 12), 2, 2)
+    elif kind == 'close':
         painter.drawLine(6, 6, 18, 18)
         painter.drawLine(18, 6, 6, 18)
     elif kind == 'settings':

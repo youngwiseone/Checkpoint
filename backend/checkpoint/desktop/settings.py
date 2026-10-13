@@ -62,7 +62,7 @@ class SettingsDialog(GlassDialog):
         general.addRow(project_actions)
         self.capture_key = QLineEdit(st.hotkeys.capture)
         general.addRow("Capture key", self.capture_key)
-        hint = QLabel("Tap: screenshot · Double tap: add text to screenshot · Hold: menu")
+        hint = QLabel("Tap: screenshot · Double tap: edit last task · Triple tap: menu · Hold: screenshot + voice note")
         hint.setObjectName('muted')
         hint.setWordWrap(True)
         general.addRow(hint)

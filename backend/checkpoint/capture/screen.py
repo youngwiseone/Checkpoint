@@ -107,8 +107,15 @@ def _grab_image(target: str, region_mode: str):  # noqa: ANN202
 
     fg = win32.foreground_info()
     region, monitor = resolve_region(target, region_mode, fg)
+    monitor = {**monitor, 'focus': focus_coordinates(region, win32.cursor_position())}
     shot = _mss().grab(region)
     return Image.frombytes("RGB", shot.size, shot.rgb), fg, region, monitor
+
+
+def focus_coordinates(region, cursor):
+    x, y = (cursor[0] - region['left'], cursor[1] - region['top']) if cursor else (None, None)
+    return {'cursor': [x, y] if x is not None and 0 <= x < region['width'] and 0 <= y < region['height'] else None,
+            'center': [region['width'] // 2, region['height'] // 2], 'units': 'image_pixels'}
 
 
 def _to_grab(img, fg, region: dict, monitor: dict) -> Grab:  # noqa: ANN001
@@ -136,7 +143,7 @@ def _to_grab(img, fg, region: dict, monitor: dict) -> Grab:  # noqa: ANN001
         thumb_jpeg=tbuf.getvalue(),
         width=img.width,
         height=img.height,
-        monitor={**monitor, "region": region},
+        monitor={**monitor, "region": region, 'focus': monitor.get('focus') or focus_coordinates(region, win32.cursor_position())},
         window_title=(fg.title if fg else "")[:500],
         fg_hwnd=fg.hwnd if fg else 0,
         work_rect=work or {k: monitor[k] for k in ("left", "top", "width", "height")},
@@ -164,7 +171,8 @@ def grab_frame(mono: float, target: str = "foreground", region_mode: str = "fore
     img, fg, region, monitor = _grab_image(target, region_mode)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=88)
-    return Frame(mono=mono, jpeg=buf.getvalue(), fg=fg, region=region, monitor=monitor)
+    return Frame(mono=mono, jpeg=buf.getvalue(), fg=fg, region=region,
+                 monitor={**monitor, 'focus': focus_coordinates(region, win32.cursor_position())})
 
 
 def frame_to_grab(f: Frame) -> Grab:

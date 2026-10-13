@@ -38,7 +38,7 @@ def _collect(item_ids: list[str], include_excerpts: bool) -> tuple[list[dict], d
             d["project_name"] = projects[w.project_id]
             ev = d.pop("evidence", [])
             d["screenshots"] = [{"id": e["capture_id"], "offset": fmt_offset(e.get("offset_ms")), "confidence": e["confidence"],
-                                 "path": None} for e in ev if e["kind"] == "capture"]
+                                 "path": None, 'focus': e.get('focus'), 'width': e['width'], 'height': e['height']} for e in ev if e["kind"] == "capture"]
             d["excerpts"] = ([{"kind": e["kind"], "source": e.get("source_label") or ("Typed note" if e["kind"] == "note" else ""),
                                "offset": fmt_offset(e.get("offset_ms")), "text": e["text"], "role": e["role"]}
                               for e in ev if e["kind"] in ("segment", "note")] if include_excerpts else [])

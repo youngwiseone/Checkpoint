@@ -191,7 +191,7 @@ export default function Home() {
       <div className="page-head">
         <div className="grow">
           <h1 className="truncate">{project.name}</h1>
-          <p><kbd>{settings.hotkeys.capture}</kbd> tap to capture · double tap to add text · hold to review. Screenshots work without starting a recording.</p>
+          <p><kbd>{settings.hotkeys.capture}</kbd> tap to capture · double tap to edit · triple tap to review · hold to dictate. Screenshots work without starting a recording.</p>
         </div>
       </div>
 

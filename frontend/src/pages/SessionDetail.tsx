@@ -181,7 +181,7 @@ function UnlinkedScreenshots({ d }: { d: SD }) {
   const label: Record<string, string> = { speech_nearby: "Speech nearby", awaiting_transcription: "Waiting for transcription", needs_context: "Needs context — no speech found nearby", transcription_failed: "Transcription failed nearby" };
   return (
     <div className="card">
-      <div className="card-head"><h3>Screenshots without a card</h3><span className="muted small">Markers from F8 or auto screenshots while audio was recording</span></div>
+      <div className="card-head"><h3>Screenshots without a card</h3><span className="muted small">Markers from F9 or auto screenshots while audio was recording</span></div>
       <div className="stack">
         {q.data.map((c) => (
           <div key={c.id} className="row top" style={{ gap: 14 }}>

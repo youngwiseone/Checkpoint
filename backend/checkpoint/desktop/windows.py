@@ -61,10 +61,11 @@ class NoteWindow(QWidget):
     """Shown when a capture needs typed context, or for an F9 text-only note."""
 
     def __init__(self, on_save: Callable[[dict, str, Optional[str]], Optional[str]],
-                 on_keep: Callable[[dict], None], on_discard: Callable[[dict], Optional[str]]):
+                 on_keep: Callable[[dict], None], on_discard: Callable[[dict], Optional[str]], on_menu=lambda: None):
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.on_save, self.on_keep, self.on_discard = on_save, on_keep, on_discard
+        self.on_menu = on_menu
         self.payload: dict = {}
         self._esc_armed = 0.0
         self._dictation = None
@@ -84,12 +85,15 @@ class NoteWindow(QWidget):
         self.heading.setObjectName("title")
         header = QHBoxLayout()
         header.addWidget(self.heading, 1)
+        self.menu_btn = QPushButton('Open menu')
+        self.menu_btn.clicked.connect(self._open_menu)
+        header.addWidget(self.menu_btn)
         self.close_button = QPushButton()
         self.close_button.setObjectName('glassCircle')
         self.close_button.setIcon(control_icon('close'))
         self.close_button.setFixedSize(44, 44)
-        self.close_button.setAccessibleName('Close note and keep screenshot for later')
-        self.close_button.setToolTip('Keep for later')
+        self.close_button.setAccessibleName('Close and keep changes')
+        self.close_button.setToolTip('Keep changes and close')
         self.close_button.clicked.connect(self._keep)
         header.addWidget(self.close_button)
         lay.addLayout(header)
@@ -102,11 +106,31 @@ class NoteWindow(QWidget):
         self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.edit_image_btn = QPushButton("Edit image")
         self.edit_image_btn.clicked.connect(self._edit_image)
+        self.image_picker = QComboBox()
+        self.image_picker.currentIndexChanged.connect(self._selected_image)
+        self.snip_btn = QPushButton('Snip image')
+        self.snip_btn.clicked.connect(self._snip)
+        self.remove_image_btn = QPushButton('Remove image')
+        self.remove_image_btn.clicked.connect(self._remove_image)
+        self.bundle_btn = QPushButton('Add to last task')
+        self.bundle_btn.setToolTip('Combine this task with the preceding open task in this project.')
+        self.bundle_btn.clicked.connect(self._bundle)
+        for button, icon, label in ((self.edit_image_btn, 'pencil', 'Edit selected image'),
+                                     (self.snip_btn, 'images', 'Snip a new image into this task'),
+                                     (self.remove_image_btn, 'close', 'Remove selected image from task')):
+            button.setText('')
+            button.setObjectName('glassCircle')
+            button.setFixedSize(44, 44)
+            button.setIcon(control_icon(icon))
+            button.setAccessibleName(label)
+            button.setToolTip(label)
         self.prompt = QLabel("What should we remember about this?")
         self.text = QPlainTextEdit()
         self.text.setPlaceholderText("Describe what you noticed…")
         self.text.setAccessibleName("What should we remember about this?")
+        self.text.setToolTip('Dotted underline: uncertain recognition. Select recorded words and press Play to hear that part.')
         self.text.setMinimumHeight(110)
+        self.text.setMaximumHeight(140)
         self.prompt.setBuddy(self.text)
         self.mic_btn = QPushButton("Dictate note")
         self.mic_btn.setIcon(microphone_icon())
@@ -139,9 +163,27 @@ class NoteWindow(QWidget):
         btns.addStretch(1)
         btns.addWidget(self.keep_btn)
         btns.addWidget(self.save_btn)
-        for w in (self.sub, self.thumb, self.edit_image_btn, self.prompt, self.text):
+        for w in (self.sub, self.thumb):
             lay.addWidget(w)
-        lay.addWidget(self.mic_btn)
+        image_actions = QHBoxLayout()
+        for w in (self.image_picker, self.edit_image_btn, self.snip_btn, self.remove_image_btn, self.bundle_btn):
+            image_actions.addWidget(w)
+        lay.addLayout(image_actions)
+        for w in (self.prompt, self.text):
+            lay.addWidget(w)
+        self.play_btn = QPushButton()
+        self.play_btn.setIcon(control_icon('play'))
+        self.play_btn.setObjectName('glassCircle')
+        self.play_btn.setFixedSize(44, 44)
+        self.play_btn.setAccessibleName('Play voice note')
+        from .playback import VoicePlayback
+        self.playback = VoicePlayback(self.play_btn, self._show_error)
+        self.play_btn.hide()
+        self.text.selectionChanged.connect(self._select_voice)
+        voice_actions = QHBoxLayout()
+        voice_actions.addWidget(self.play_btn)
+        voice_actions.addWidget(self.mic_btn, 1)
+        lay.addLayout(voice_actions)
         lay.addWidget(self.dictation_status)
         lay.addLayout(row)
         lay.addWidget(self.error)
@@ -163,19 +205,36 @@ class NoteWindow(QWidget):
             self.setStyleSheet(note_css(c))
 
     def open_for(self, payload: dict) -> None:
+        if self.isVisible() and self.payload.get('id') == payload.get('id'):
+            self.raise_()
+            self.activateWindow()
+            return
         self._cancel_dictation()
+        self.playback.stop()
         self._apply_theme()
         self.mic_btn.setIcon(microphone_icon())
+        if payload.get('id'):
+            from ..services.task_evidence import capture_editor_payload
+            try:
+                payload = {**payload, **capture_editor_payload(payload['id'])}
+            except ValueError:
+                pass
         self.payload = payload
         is_capture = bool(payload.get("id"))
-        self.text.clear()
-        self.category.setCurrentIndex(0)
+        self.text.setPlainText(payload.get('text', ''))
+        self.category.setCurrentIndex(max(0, self.category.findData(payload.get('category', ''))))
+        self._original_text = self.text.toPlainText()
         self.error.hide()
         self._esc_armed = 0.0
+        self._refresh_images()
+        self.snip_btn.setVisible(bool(payload.get('item_id')))
+        self.bundle_btn.setVisible(bool(payload.get('item_id')))
+        self.playback.set_evidence(payload.get('evidence', []))
+        self._highlight_uncertain()
         if is_capture:
-            self.heading.setText("Screenshot saved")
+            self.heading.setText('Edit task' if payload.get('item_id') else 'Screenshot saved')
             reason = payload.get("reason")
-            self.sub.setText("No audible audio detected, so add a quick note." if reason == "no_audio" else "Add context for this screenshot.")
+            self.sub.setText("No audible audio detected, so add a quick note." if reason == "no_audio" else "Add notes or another image to this task.")
             pix = QPixmap(payload.get("thumb_path", ""))
             if not pix.isNull():
                 self.thumb.setPixmap(pix.scaled(404, 168, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
@@ -190,6 +249,8 @@ class NoteWindow(QWidget):
             self.edit_image_btn.hide()
             self.keep_btn.setText("Cancel")
             self.discard_btn.hide()
+        if self.image_picker.count():
+            self._selected_image()
         self._fit()
         self._place(payload.get("work_rect"))
         self.backdrop = capture_backdrop(self)
@@ -199,6 +260,131 @@ class NoteWindow(QWidget):
         self.activateWindow()
         win32.restore_foreground(int(self.winId()))
         self.text.setFocus()
+
+    def _refresh_images(self):
+        captures = [e for e in self.payload.get('evidence', []) if e['kind'] == 'capture']
+        self.image_picker.blockSignals(True)
+        self.image_picker.clear()
+        for index, capture in enumerate(captures, 1):
+            self.image_picker.addItem(f'Image {index}', capture['capture_id'])
+        self.image_picker.blockSignals(False)
+        self.image_picker.setVisible(len(captures) > 1)
+        self.remove_image_btn.setVisible(bool(captures))
+        if captures:
+            self._selected_image()
+
+    def _selected_image(self):
+        cid = self.image_picker.currentData()
+        if cid:
+            from .editor import capture_path
+            self.payload['id'] = cid
+            pix = QPixmap(str(capture_path(cid)))
+            self.thumb.setPixmap(pix.scaled(404, 168, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    def _persist_editor(self):
+        text = self.text.toPlainText()
+        category = self.category.currentData() or None
+        if (text.strip() or self.payload.get('item_id')) and (text != self.payload.get('text', '') or category != self.payload.get('category')):
+            error = self.on_save(self.payload, text, self.category.currentData() or None)
+            if error:
+                self._show_error(error)
+                return False
+            self.payload['text'] = text
+            self.payload['category'] = category
+        return True
+
+    def _reload_evidence(self):
+        from ..services.review import get_work_item
+        item = get_work_item(self.payload['item_id'])
+        self.payload['evidence'] = item['evidence']
+        self._refresh_images()
+        self.playback.set_evidence(item['evidence'])
+        self._highlight_uncertain()
+        self.thumb.setVisible(self.image_picker.count() > 0)
+        self.edit_image_btn.setVisible(self.image_picker.count() > 0)
+        if not self.image_picker.count():
+            self.payload.pop('id', None)
+
+    def _highlight_uncertain(self):
+        import re
+        from PySide6.QtGui import QTextCursor
+        from PySide6.QtWidgets import QTextEdit
+        selections = []
+        for entry in self.payload.get('evidence', []):
+            for word in entry.get('speech_words') or []:
+                if not word.get('low'):
+                    continue
+                for match in re.finditer(re.escape(word['text']), self.text.toPlainText(), re.I):
+                    selection = QTextEdit.ExtraSelection()
+                    selection.cursor = self.text.textCursor()
+                    # Qt positions count UTF-16 code units.
+                    start = len(self.text.toPlainText()[:match.start()].encode('utf-16-le')) // 2
+                    end = len(self.text.toPlainText()[:match.end()].encode('utf-16-le')) // 2
+                    selection.cursor.setPosition(start)
+                    selection.cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                    selection.format.setUnderlineStyle(selection.format.UnderlineStyle.DotLine)
+                    selection.format.setUnderlineColor(colors.current().warn)
+                    selections.append(selection)
+        self.text.setExtraSelections(selections)
+
+    def _select_voice(self):
+        selected = self.text.textCursor().selectedText().strip().lower()
+        evidence = self.payload.get('evidence', [])
+        self.playback.set_evidence(evidence)
+        if not selected:
+            return
+        for entry in evidence:
+            words = entry.get('speech_words') or []
+            for index, word in enumerate(words):
+                for end in range(index, min(len(words), index + 12)):
+                    phrase = ' '.join(w['text'] for w in words[index:end + 1]).strip().lower()
+                    if phrase == selected and entry.get('audio_url'):
+                        self.playback.entries = [{**entry, 'start_s': word['start'], 'end_s': words[end]['end']}]
+                        self.play_btn.setToolTip('Play selected words')
+                        return
+
+    def _bundle(self):
+        if not self._persist_editor():
+            return
+        from ..services.task_evidence import bundle_previous
+        from ..services.review import get_work_item
+        try:
+            iid = bundle_previous(self.payload['item_id'])
+            item = get_work_item(iid)
+            self.payload['item_id'], self.payload['text'] = iid, item['description']
+            self.text.setPlainText(item['description'])
+            self._reload_evidence()
+            self.sub.setText('Added to the previous task.')
+        except ValueError as error:
+            self._show_error(str(error))
+
+    def _snip(self):
+        if not self._persist_editor():
+            return
+        from .snipping import snip_into
+        def done(error):
+            if error:
+                self._show_error(error)
+            else:
+                self._reload_evidence()
+                self._fit()
+        snip_into(self.payload['item_id'], self, done)
+
+    def _remove_image(self):
+        if not self._persist_editor():
+            return
+        from ..services.task_evidence import detach_capture
+        try:
+            detach_capture(self.payload['item_id'], self.payload['id'])
+            self._reload_evidence()
+        except ValueError as error:
+            self._show_error(str(error))
+
+    def _open_menu(self):
+        if self._dictation is not None or not self._persist_editor():
+            return
+        self._close()
+        self.on_menu()
 
     def paintEvent(self, event):
         from .glass import paint_glass
@@ -217,6 +403,8 @@ class NoteWindow(QWidget):
         pix = QPixmap(str(capture_path(capture_id)))
         if not pix.isNull():
             self.thumb.setPixmap(pix.scaled(404, 168, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        if self.payload.get('item_id'):
+            self._reload_evidence()
 
     def _place(self, work: Optional[dict]) -> None:
         if work:
@@ -231,6 +419,7 @@ class NoteWindow(QWidget):
 
     def _close(self) -> None:
         self._cancel_dictation()
+        self.playback.stop()
         prev = self.payload.get("fg_hwnd") or 0
         self.hide()
         if prev:
@@ -252,6 +441,7 @@ class NoteWindow(QWidget):
         self.error.hide()
         self._dictation_save = False
         self._dictation = NoteDictation(get_settings().audio.mic_device)
+        self._dictation.project_id = self.payload.get('project_id')
         self.mic_btn.setText("Stop dictation")
         self.dictation_status.setText("Opening microphone…")
         self._dictation.start()
@@ -263,6 +453,14 @@ class NoteWindow(QWidget):
         if recording is None:
             return
         phase = recording.phase
+        audio = getattr(recording, 'audio', b'')
+        if audio and self.payload.get('id') and not getattr(recording, 'retained_note_id', None):
+            from ..services.voice import retain
+            try:
+                recording.retained_note_id = retain(self.payload['id'], audio)
+            except (ValueError, OSError) as error:
+                self._show_error('Could not retain voice recording: ' + str(error))
+                return
         if phase != "done":
             self.dictation_status.setText({"starting": "Opening microphone…", "recording": "Listening… click Stop dictation when finished (up to 60 seconds).",
                                            "transcribing": "Transcribing with Whistle…"}[phase])
@@ -275,6 +473,17 @@ class NoteWindow(QWidget):
         self.mic_btn.setEnabled(True)
         self.mic_btn.setText("Dictate note")
         self._dictation_save = False
+        audio = getattr(recording, 'audio', b'')
+        if audio and self.payload.get('id'):
+            from ..services.voice import retain
+            try:
+                from ..services.voice import finish_note
+                nid = getattr(recording, 'retained_note_id', None) or retain(self.payload['id'], audio, recording.text)
+                finish_note(nid, recording.text, getattr(recording, 'words', []))
+                self._reload_evidence()
+            except (ValueError, OSError) as error:
+                self._show_error('Could not retain voice recording: ' + str(error))
+                return
         if recording.error:
             self.dictation_status.setText("")
             self._show_error("Couldn't dictate: " + recording.error)
@@ -288,6 +497,7 @@ class NoteWindow(QWidget):
         cursor.insertText((" " if self.text.toPlainText() and not self.text.toPlainText()[-1].isspace() else "") + recording.text)
         self.text.setTextCursor(cursor)
         self.dictation_status.setText("Dictation added. Edit it or save your note.")
+        self._highlight_uncertain()
         self._fit()
         if save:
             self._save()
@@ -306,6 +516,7 @@ class NoteWindow(QWidget):
     def _fit(self) -> None:
         """Resize to the content. The layouts keep their old size until their posted relayout runs, so flush it
         first: otherwise the window keeps the previous note's height (cutting off the thumbnail, or leaving a gap)."""
+        self.dictation_status.setVisible(bool(self.dictation_status.text()))
         QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
         self.root.layout().activate()
         self.layout().activate()
@@ -334,6 +545,13 @@ class NoteWindow(QWidget):
         self._close()
 
     def _keep(self) -> None:
+        if self._dictation is not None and self.payload.get('id'):
+            self._dictation_save = True
+            self._dictation.stop()
+            self.dictation_status.setText('Finishing your voice note before closing…')
+            return
+        if self.payload.get('item_id') and self._dictation is None and not self._persist_editor():
+            return
         if not self.payload.get("id"):
             if self.text.toPlainText().strip() and time.monotonic() - self._esc_armed > 2:
                 self._esc_armed = time.monotonic()

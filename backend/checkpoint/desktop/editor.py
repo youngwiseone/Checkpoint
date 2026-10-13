@@ -151,18 +151,39 @@ class TaskDialog(GlassDialog):
         self.screenshot.setObjectName('imagePreview')
         self.screenshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.screenshot)
-        if self.captures:
-            actions = QHBoxLayout()
-            self.picker = QComboBox()
-            for index, capture in enumerate(self.captures):
-                self.picker.addItem(f"Screenshot {index + 1}" + (" · possibly related" if capture["confidence"] != "direct" else ""), capture["capture_id"])
-            self.picker.currentIndexChanged.connect(self._image)
-            actions.addWidget(self.picker, 1)
-            edit = QPushButton("Edit screenshot")
-            edit.clicked.connect(self._edit_image)
-            actions.addWidget(edit)
-            layout.addLayout(actions)
-            self._image()
+        actions = QHBoxLayout()
+        self.picker = QComboBox()
+        for index, capture in enumerate(self.captures):
+            self.picker.addItem(f"Screenshot {index + 1}" + (" · possibly related" if capture["confidence"] != "direct" else ""), capture["capture_id"])
+        self.picker.currentIndexChanged.connect(self._image)
+        actions.addWidget(self.picker, 1)
+        from .icons import control_icon
+        from .playback import VoicePlayback
+        self.play_button = QPushButton()
+        self.play_button.setObjectName('glassCircle')
+        self.play_button.setFixedSize(44, 44)
+        self.play_button.setIcon(control_icon('play'))
+        self.play_button.setAccessibleName('Play voice note')
+        self.voice_playback = VoicePlayback(self.play_button, lambda error: self.message.setText(error))
+        self.voice_playback.set_evidence(self.item['evidence'])
+        self.finished.connect(lambda _: self.voice_playback.stop())
+        actions.addWidget(self.play_button)
+        edit = QPushButton("Edit screenshot")
+        edit.clicked.connect(self._edit_image)
+        actions.addWidget(edit)
+        self.edit_image_btn = edit
+        remove = QPushButton('Remove image')
+        remove.clicked.connect(self._remove_image)
+        actions.addWidget(remove)
+        self.remove_image_btn = remove
+        layout.addLayout(actions)
+        self._image()
+        extras = QHBoxLayout()
+        for label, callback in (('Add to last task', self._bundle), ('Snip image', self._snip), ('Open menu', self._menu)):
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            extras.addWidget(button)
+        layout.addLayout(extras)
         self.title = QLineEdit(self.item["title"])
         self.title.setMaxLength(300)
         self.title.setAccessibleName("Title")
@@ -190,12 +211,79 @@ class TaskDialog(GlassDialog):
         layout.addWidget(buttons)
 
     def _image(self):
+        has_image = bool(self.picker.currentData())
+        self.screenshot.setVisible(has_image)
+        self.edit_image_btn.setEnabled(has_image)
+        self.remove_image_btn.setEnabled(has_image)
+        if not has_image:
+            return
         pixmap = QPixmap(str(capture_path(self.picker.currentData())))
         self.screenshot.setPixmap(pixmap.scaled(700, 280, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def _edit_image(self):
+        if not self._commit():
+            return
         ScreenshotDialog(self.picker.currentData(), self).exec()
+        self._refresh_evidence()
+
+    def _refresh_evidence(self):
+        current = get_work_item(self.item_id)
+        self.item['version'] = current['version']
+        self.item['evidence'] = current['evidence']
+        self.voice_playback.set_evidence(current['evidence'])
+        self.captures = [e for e in current['evidence'] if e['kind'] == 'capture']
+        self.picker.blockSignals(True)
+        self.picker.clear()
+        for index, capture in enumerate(self.captures, 1):
+            self.picker.addItem(f'Image {index}', capture['capture_id'])
+        self.picker.blockSignals(False)
         self._image()
+
+    def _remove_image(self):
+        if not self._commit():
+            return
+        from ..services.task_evidence import detach_capture
+        try:
+            detach_capture(self.item_id, self.picker.currentData())
+            self._refresh_evidence()
+        except ValueError as error:
+            self.message.setText(str(error))
+
+    def _commit(self):
+        try:
+            self.item = update_work_item(self.item_id, {'title': self.title.text(), 'description': self.description.toPlainText()}, self.item['version'])
+            return True
+        except ValueError as error:
+            self.message.setText(str(error))
+            return False
+
+    def _bundle(self):
+        if not self._commit():
+            return
+        from ..services.task_evidence import bundle_previous
+        try:
+            self.item_id = bundle_previous(self.item_id)
+            self.item = get_work_item(self.item_id)
+            self.title.setText(self.item['title'])
+            self.description.setPlainText(self.item['description'])
+            self._refresh_evidence()
+        except ValueError as error:
+            self.message.setText(str(error))
+
+    def _snip(self):
+        if not self._commit():
+            return
+        from .snipping import snip_into
+        def done(error):
+            if error:
+                self.message.setText(error)
+            else:
+                self._refresh_evidence()
+        snip_into(self.item_id, self, done)
+
+    def _menu(self):
+        if self._commit():
+            self.accept()
 
     def _save(self):
         try:

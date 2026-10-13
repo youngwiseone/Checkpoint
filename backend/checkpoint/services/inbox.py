@@ -15,7 +15,8 @@ def reconcile() -> None:
             DraftItem.review_state == "pending", DraftItem.merged_into_id.is_(None))).all())
         dismissed_captures = set(s.scalars(select(EvidenceLink.capture_id).join(DraftItem, DraftItem.id == EvidenceLink.draft_id)
                                             .where(DraftItem.review_state == "dismissed")).all())
-        unfinished = list(s.scalars(select(Capture.id).where(Capture.status.in_(("unfinished", "marker", "saved")))).all())
+        unfinished = list(s.scalars(select(Capture.id).where(Capture.status.in_(("unfinished", "marker", "saved")),
+                                                            Capture.trigger != 'auto')).all())
     if pending:
         approve(pending)
     for cid in unfinished:
@@ -75,6 +76,8 @@ class InboxWorker(Worker):
         self.last_signature = None
 
     def step(self) -> bool:
+        from .automatic import settle
+        settle()
         with read_session() as s:
             signature = (
                 s.scalar(select(func.count(Capture.id))),

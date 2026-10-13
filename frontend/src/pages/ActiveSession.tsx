@@ -66,7 +66,7 @@ export function QuickNote() {
         onKeyDown={(e) => { if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); if (text.trim()) save.mutate(); } }}
         placeholder="Something to remember… (Ctrl+Enter to save)" style={{ marginTop: 6 }} />
       <div className="row" style={{ marginTop: 8 }}>
-        <span className="hint grow">Same as <kbd>F9</kbd> from anywhere.</span>
+        <span className="hint grow">Double-tap <kbd>F9</kbd> from anywhere to edit the last task.</span>
         <button className="btn" disabled={!text.trim() || save.isPending}>Save note</button>
       </div>
     </form>
@@ -160,7 +160,7 @@ export default function ActiveSession() {
         <div className="stack-lg">
           <div className="card">
             <div className="card-head"><h3>Capture</h3>
-              <span className="kbd-hints">Tap capture · double tap to add text · hold to review</span>
+              <span className="kbd-hints">Tap capture · double tap to edit · triple tap to review · hold to dictate</span>
             </div>
             {!state!.desktop.available && <Banner kind="warn">Global hotkeys need the desktop helper. Launch Checkpoint with <code>start.cmd</code>.</Banner>}
             {state!.desktop.available && state!.desktop.hotkeys.ok === false && <Banner kind="warn">Shortcut problem: {state!.desktop.hotkeys.reason}. <Link to="/settings">Change shortcuts</Link></Banner>}
@@ -176,7 +176,7 @@ export default function ActiveSession() {
 
           <div className="card">
             <div className="card-head"><h3>Recent captures</h3><span className="muted small">{detail.data?.capture_count ?? 0} total</span></div>
-            {!captures.length ? <p className="muted">Nothing captured yet. Press <kbd>F8</kbd> in your game or app.</p> : (
+            {!captures.length ? <p className="muted">Nothing captured yet. Press <kbd>F9</kbd> in your game or app.</p> : (
               <div className="row wrap" style={{ gap: 12 }}>
                 {captures.map((c) => (
                   <figure key={c.id} style={{ margin: 0 }}>

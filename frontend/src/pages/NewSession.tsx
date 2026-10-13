@@ -274,10 +274,10 @@ export default function NewSession() {
           {mic || loop ? (
             <Banner kind="warn">
               <p><b>Will record: {recordingSummary}.</b> Tell everyone on the call that you're recording.</p>
-              <p className="small">F8 saves a screenshot and a timeline marker; <kbd>Shift+F8</kbd> always asks for a note.</p>
+              <p className="small">Tap F9 to save a screenshot; double-tap to edit, triple-tap to review, or hold to dictate.</p>
             </Banner>
           ) : (
-            <Banner kind="info"><p><b>No audio selected — F8 will ask for a note.</b> Screenshots and notes are saved immediately either way.</p></Banner>
+            <Banner kind="info"><p><b>No audio selected — tapping F9 will ask for a note.</b> Screenshots and notes are saved immediately either way.</p></Banner>
           )}
           <div className="row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
             <button className="btn" onClick={() => nav(-1)}>Cancel</button>

@@ -250,6 +250,8 @@ class Note(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     capture_id: Mapped[Optional[str]] = mapped_column(ForeignKey("captures.id", ondelete="SET NULL"), nullable=True)
     text: Mapped[str] = mapped_column(Text)
+    audio_rel_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    speech_words: Mapped[Any] = mapped_column(JSON, nullable=True)
     category: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     kind: Mapped[str] = mapped_column(String(20), default="typed")  # typed | quick | manual
     taken_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
@@ -310,6 +312,7 @@ class WorkItem(Base):
     agent_commit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     sent_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     duplicate_of_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)  # a repeat report, added as evidence
+    feedback_reason: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     human_updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
     description_edited: Mapped[bool] = mapped_column(Boolean, default=False)
