@@ -107,6 +107,10 @@ class Paths:
         return self.root / "audio"
 
     @property
+    def transcripts(self) -> Path:
+        return self.root / "transcripts"
+
+    @property
     def models(self) -> Path:
         return self.root / "models"
 
@@ -123,7 +127,7 @@ class Paths:
         return self.root / "shared-cache"
 
     def ensure(self) -> None:
-        for p in (self.root, self.media, self.audio, self.models, self.logs, self.exports, self.shared_cache):
+        for p in (self.root, self.media, self.audio, self.transcripts, self.models, self.logs, self.exports, self.shared_cache):
             p.mkdir(parents=True, exist_ok=True)
 
 

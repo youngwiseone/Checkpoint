@@ -36,6 +36,12 @@ To capture what you're saying as you test, choose your microphone and/or compute
 
 In review, the task text stays visible in a frosted caption along the bottom of each screenshot card. Click its pencil button to edit notes or screenshots, drag a task **up to mark Done**, or **down to delete**. Deleted tasks can be reopened.
 
+Hold **Shift** while clicking a card or pressing **← / →** to select a range. Hold **Ctrl** and click to add or remove individual cards. Drag a selected card up or down to finish or delete the whole selection; **Undo** restores the group. Shift-click **Oldest** or **Newest** to select through that end of the deck.
+
+Click outside the main review menu to hide it. Note, screenshot-edit and settings windows stay open. Opening task images also hides review so the folder is visible.
+
+When session transcription is enabled, all recorded speech is saved in a UTF-8 text file named after the session, including speech without screenshots. Live transcription updates the file while recording; **After recording** fills it once the session ends. Right-click the record button for **Transcript history → Open transcript**, or **Open transcripts folder**. The files live under `transcripts/<session-id>/<session-name>.txt` in your data folder, with timestamps and audio-source labels. You can give this file to your assistant to find more tasks.
+
 ## Work through your tasks
 
 - **Use images:** Click **Open task images** and drag the generated images into Codex, Claude or your preferred chat. Each includes the screenshot and its notes. Include every page for longer notes.

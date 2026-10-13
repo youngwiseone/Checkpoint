@@ -18,6 +18,7 @@ def usage() -> dict:
         "database_bytes": db,
         "screenshots_bytes": dir_size(p.media),
         "audio_bytes": dir_size(p.audio),
+        "transcripts_bytes": dir_size(p.transcripts),
         "models_bytes": dir_size(p.models),
         "shared_cache_bytes": dir_size(p.shared_cache),
     }
@@ -39,6 +40,7 @@ def session_impact(session_id: str) -> dict:
     return {
         "session_id": session_id,
         "audio_bytes": dir_size(paths().audio / session_id),
+        "transcript_bytes": dir_size(paths().transcripts / session_id),
         "screenshot_bytes": dir_size(paths().media / session_id),
         "audio_chunks": chunks,
         "captures": len(cap_ids),
@@ -60,6 +62,8 @@ def delete_raw_audio(session_id: str) -> dict:
             c.state = "deleted"
         sess.raw_audio_deleted = True
     remove_tree(paths().audio / session_id, paths().audio)
+    from .transcripts import refresh_session_transcript
+    refresh_session_transcript(session_id)
     return {"ok": True}
 
 
@@ -79,4 +83,6 @@ def delete_session(session_id: str, confirm_items_lose_evidence: bool) -> dict:
         s.delete(sess)
     remove_tree(paths().audio / session_id, paths().audio)
     remove_tree(paths().media / session_id, paths().media)
+    from .transcripts import remove_session_transcripts
+    remove_session_transcripts(session_id)
     return {"ok": True, "kept_items": impact["approved_items"]}

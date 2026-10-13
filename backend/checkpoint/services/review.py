@@ -456,45 +456,60 @@ def get_work_item(item_id: str) -> dict:
 EDITABLE_WORK = {"type", "title", "description", "work_status", "assignee", "priority", "tags"}
 
 
-def update_work_item(item_id: str, patch: dict[str, Any], expected_version: Optional[int] = None) -> dict:
-    from ..settings_store import get_settings
+def _apply_work_patch(s, w, patch, who):
+    changed = False
+    for k, v in patch.items():
+        if k not in EDITABLE_WORK:
+            continue
+        if k == "type" and v not in ITEM_TYPES:
+            raise ReviewError("Unknown type")
+        if k == "work_status":
+            if v not in WORK_STATUSES:
+                raise ReviewError("Unknown status")
+            w.completed_at = utcnow() if v == "done" else None
+        if k == "title":
+            v = (v or "").strip()[:300]
+            if not v:
+                raise ReviewError("Title can't be empty")
+        if k == "tags":
+            v = [str(t)[:40] for t in (v or [])][:20]
+        if getattr(w, k) != v:
+            setattr(w, k, v)
+            if k == "description":
+                w.description_edited = True
+            changed = True
+    if changed:
+        _bump_work_item(s, w, who)
+        for entry in s.scalars(select(ChecklistEntry).where(ChecklistEntry.work_item_id == w.id)).all():
+            entry.state = "done" if w.work_status == "done" else ("open" if entry.state == "done" else entry.state)
+            entry.completed_at = w.completed_at
 
+
+def update_work_items(changes: Iterable[tuple[str, dict[str, Any], Optional[int]]],
+                      *, with_evidence: bool = False) -> list[dict]:
+    """Apply a group in one transaction; any stale version rolls back the whole group."""
+    from ..settings_store import get_settings
+    changes = list(changes)
+    if len({item_id for item_id, _, _ in changes}) != len(changes):
+        raise ReviewError("A card can only occur once in a batch.")
     who = get_settings().sharing.display_name or None
     with write_session() as s:
-        w = s.get(WorkItem, item_id)
-        if w is None:
-            raise ReviewError("Item not found")
-        if expected_version is not None and expected_version != w.version:
-            raise ReviewError("This item changed elsewhere. Reload to see the latest version.")
-        changed = False
-        for k, v in patch.items():
-            if k not in EDITABLE_WORK:
-                continue
-            if k == "type" and v not in ITEM_TYPES:
-                raise ReviewError("Unknown type")
-            if k == "work_status":
-                if v not in WORK_STATUSES:
-                    raise ReviewError("Unknown status")
-                w.completed_at = utcnow() if v == "done" else None
-            if k == "title":
-                v = (v or "").strip()[:300]
-                if not v:
-                    raise ReviewError("Title can't be empty")
-            if k == "tags":
-                v = [str(t)[:40] for t in (v or [])][:20]
-            if getattr(w, k) != v:
-                setattr(w, k, v)
-                if k == "description":
-                    w.description_edited = True
-                changed = True
-        if changed:
-            _bump_work_item(s, w, who)
-            # Keep a linked checklist entry in step with explicit status changes.
-            for e in s.scalars(select(ChecklistEntry).where(ChecklistEntry.work_item_id == w.id)).all():
-                e.state = "done" if w.work_status == "done" else ("open" if e.state == "done" else e.state)
-                e.completed_at = w.completed_at
+        items = []
+        for item_id, patch, expected_version in changes:
+            item = s.get(WorkItem, item_id)
+            if item is None:
+                raise ReviewError("Item not found")
+            if expected_version is not None and expected_version != item.version:
+                raise ReviewError("This item changed elsewhere. Reload to see the latest version.")
+            items.append((item, patch))
+        for item, patch in items:
+            _apply_work_patch(s, item, patch, who)
         s.flush()
-        return work_item_dict(s, w, with_evidence=True)
+        return [work_item_dict(s, item, with_evidence=with_evidence) for item, _ in items]
+
+
+def update_work_item(item_id: str, patch: dict[str, Any], expected_version: Optional[int] = None) -> dict:
+    return update_work_items([(item_id, patch, expected_version)], with_evidence=True)[0]
 
 
 def create_work_item(project_id: str, type_: str, title: str, description: str = "", session_id: Optional[str] = None) -> dict:

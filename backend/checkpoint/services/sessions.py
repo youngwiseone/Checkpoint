@@ -173,6 +173,8 @@ class SessionManager:
             for r in active.recorders.values():
                 r.start()
         self._start_heartbeat()
+        from .transcripts import refresh_session_transcript
+        refresh_session_transcript(session_id)
         hooks.emit_state()
         return session_id
 
@@ -244,6 +246,8 @@ class SessionManager:
                 if sess.ai_enabled and sess.processing_state == "none":
                     sess.processing_state = "queued"
             self.active = None
+        from .transcripts import refresh_session_transcript
+        refresh_session_transcript(a.id)
         hooks.emit_state()
         return a.id
 

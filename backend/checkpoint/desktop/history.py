@@ -1,5 +1,6 @@
 """Browse and correct recorded transcripts without a browser."""
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
                               QLabel, QListWidget, QListWidgetItem, QPushButton)
 from sqlalchemy import select
@@ -34,7 +35,8 @@ class HistoryDialog(GlassDialog):
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
         actions = QHBoxLayout()
-        for label, callback in (("Refresh", self.refresh), ("Create task from selection", self._task), ("Close", self.accept)):
+        for label, callback in (("Refresh", self.refresh), ("Open transcript", self._open_transcript),
+                                ("Create task from selection", self._task), ("Close", self.accept)):
             button = QPushButton(label)
             button.clicked.connect(callback)
             actions.addWidget(button)
@@ -66,7 +68,24 @@ class HistoryDialog(GlassDialog):
         if ok and text.strip():
             with write_session() as s:
                 s.get(TranscriptSegment, segment_id).corrected_text = text.strip()
+            from ..services.transcripts import refresh_session_transcript
+            refresh_session_transcript(self.sessions.currentData())
             self.refresh()
+
+    def _open_transcript(self):
+        from ..services.transcripts import write_session_transcript
+        session_id = self.sessions.currentData()
+        if not session_id:
+            self.message.setText('Choose a recording first.')
+            return
+        try:
+            path = write_session_transcript(session_id)
+            if path is None:
+                self.message.setText('Transcription is off for this session. Enable it to generate a transcript.')
+            elif not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+                self.message.setText(f'Transcript saved: {path}')
+        except (ValueError, OSError) as error:
+            self.message.setText(str(error))
 
     def _task(self):
         ids = [item.data(Qt.ItemDataRole.UserRole) for item in self.lines.selectedItems()]

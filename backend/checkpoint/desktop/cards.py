@@ -20,6 +20,8 @@ class TaskDeck(QWidget):
     navigate = Signal(int)
     decide = Signal(str)
     expand = Signal()
+    select_cards = Signal(int, object)
+    prepare_group_drag = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,6 +57,10 @@ class TaskDeck(QWidget):
         self.pointer = None
         self.axis = None
         self.pressed_card = 0
+        self.press_modifiers = Qt.KeyboardModifier.NoModifier
+        self.selected_ids = set()
+        self.selection_explicit = False
+        self._dragging_ids = set()
         self.wheel_delta = 0
         self.last_wheel = 0
         self.setMouseTracking(True)
@@ -62,7 +68,7 @@ class TaskDeck(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName('Capture carousel. Drag sideways to browse, up to mark done, down to delete, or click to edit.')
+        self.setAccessibleName('Capture carousel. Shift-click to select a range, Ctrl-click to toggle cards. Drag up to mark the selection done, down to delete, sideways to browse, or use the pencil to edit.')
         self.animation = self._animation(self._animate)
         self.horizontal_animation = self._animation(self._animate_horizontal)
         self.setMinimumHeight(280)
@@ -156,11 +162,13 @@ class TaskDeck(QWidget):
         self.horizontal_animation.setEndValue(0.0)
         self.horizontal_animation.start()
 
-    def present(self, item, image, count, direction=0, behind=None, ordinal=0):
+    def present(self, item, image, count, direction=0, behind=None, ordinal=0, selected_ids=None, selection_explicit=False):
         changed = (self.item or {}).get('id') != (item or {}).get('id')
         self.item, self.image, self.count = item, image, count
         self.behind = behind or []
         self.ordinal = ordinal
+        self.selected_ids = set(selected_ids) if selected_ids is not None else ({item['id']} if item else set())
+        self.selection_explicit = selection_explicit
         self.oldest_button.setEnabled(ordinal > 1)
         self.newest_button.setEnabled(bool(ordinal and ordinal < count))
         self._place_buttons()
@@ -246,7 +254,8 @@ class TaskDeck(QWidget):
         return self._base_rect().width() * .76
 
     def card_rect(self):
-        return self._base_rect().translated(self.horizontal_offset, self.offset)
+        offset = self.offset if not self._dragging_ids or (self.item or {}).get('id') in self._dragging_ids else 0
+        return self._base_rect().translated(self.horizontal_offset, offset)
 
     def neighbors(self):
         for index, entry in enumerate(self.behind):
@@ -258,7 +267,9 @@ class TaskDeck(QWidget):
     def _neighbor_rect(self, relative):
         rect = self._base_rect()
         rect = rect.adjusted(0, rect.height() * .025, 0, -rect.height() * .025)
-        return rect.translated(relative * self.card_spacing() + self.horizontal_offset, 0)
+        item = next((item for n, item, _ in self.neighbors() if n == relative), {})
+        offset = self.offset if item.get('id') in self._dragging_ids else 0
+        return rect.translated(relative * self.card_spacing() + self.horizontal_offset, offset)
 
     def back_cards(self):
         for relative, item, image in sorted(self.neighbors(), key=lambda entry: abs(entry[0]), reverse=True):
@@ -300,8 +311,11 @@ class TaskDeck(QWidget):
         self._paint_card(painter, rect, self.item, self.image, c)
         if self.axis == 'vertical' and abs(self.offset) > 16:
             decision = 'DONE' if self.offset < 0 else 'DELETED'
+            if len(self._dragging_ids) > 1:
+                decision += f' · {len(self._dragging_ids)}'
             tint = c.success if self.offset < 0 else c.danger
-            badge = QRectF(rect.center().x() - 68, rect.top() + 14, 136, 38)
+            anchor = rect if (self.item or {}).get('id') in self._dragging_ids else self._neighbor_rect(self.pressed_card)
+            badge = QRectF(anchor.center().x() - 68, anchor.top() + 14, 136, 38)
             painter.setPen(QPen(tint, 2))
             painter.setBrush(colors.alpha(c.card, 240))
             painter.drawRoundedRect(badge, 12, 12)
@@ -344,11 +358,16 @@ class TaskDeck(QWidget):
             painter.setBrush(QColor(24, 34, 50, 12))
             painter.drawRoundedRect(rect.adjusted(-spread, spread, spread, spread * 2), 24, 24)
         if not back and self.ordinal:
-            counter = QRectF(rect.center().x() - 42, rect.top() - 40, 84, 30)
+            text = f'{self.ordinal} / {self.count}'
+            if self.selection_explicit:
+                text += f' · {len(self.selected_ids)} selected'
+            width = max(84, QFontMetricsF(QFont('Segoe UI', 10)).horizontalAdvance(text) + 36)
+            counter = QRectF(rect.center().x() - width / 2, rect.top() - 40, width, 30)
             paint_glass(painter, counter, c, radius=15)
             painter.setPen(c.text)
             painter.setFont(QFont('Segoe UI', 10, QFont.Weight.DemiBold))
-            painter.drawText(counter, Qt.AlignmentFlag.AlignCenter, f'{self.ordinal} / {self.count}')
+            painter.drawText(counter, Qt.AlignmentFlag.AlignCenter, text)
+        painter.save()
         shape = QPainterPath()
         shape.addRoundedRect(rect, 24, 24)
         painter.setClipPath(shape, Qt.ClipOperation.IntersectClip)
@@ -377,10 +396,20 @@ class TaskDeck(QWidget):
                               panel.width() - 32, spacing)
                 painter.drawText(line, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
             painter.restore()
-        painter.setClipping(False)
+        painter.restore()
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(colors.alpha(c.surface_2, 220), 2))
         painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 23, 23)
+        if self.selection_explicit and item['id'] in self.selected_ids:
+            painter.setPen(QPen(c.accent, 3))
+            painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), 22, 22)
+            badge = QRectF(rect.left() + 10, rect.top() + 10, 26, 26)
+            painter.setBrush(c.accent)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(badge)
+            painter.setPen(QPen(c.on_accent, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.drawLine(badge.topLeft() + QPointF(6, 13), badge.topLeft() + QPointF(11, 18))
+            painter.drawLine(badge.topLeft() + QPointF(11, 18), badge.topLeft() + QPointF(20, 8))
         painter.restore()
 
     def enterEvent(self, event):
@@ -401,7 +430,7 @@ class TaskDeck(QWidget):
                 return relative
         return None
 
-    def begin_drag(self, point):
+    def begin_drag(self, point, modifiers=Qt.KeyboardModifier.NoModifier):
         if self.press is not None:
             return
         hit = self._hit_card(point)
@@ -413,7 +442,9 @@ class TaskDeck(QWidget):
         self.offset = 0.0
         self.drag_start_x = self.horizontal_offset
         self.press = point
+        self.press_modifiers = modifiers
         self.pressed_card = hit
+        self._dragging_ids.clear()
         self.axis = None
 
     def drag_to(self, point):
@@ -430,7 +461,12 @@ class TaskDeck(QWidget):
                 # Elastic resistance at the first and last card.
                 self.horizontal_offset = max(low, min(high, proposed))
                 self.horizontal_offset += (proposed - self.horizontal_offset) * .22
-            elif self.axis == 'vertical' and self.pressed_card == 0:
+            elif self.axis == 'vertical':
+                if not self._dragging_ids:
+                    self.prepare_group_drag.emit(self.pressed_card)
+                    item = self.item if self.pressed_card == 0 else next(
+                        (item for n, item, _ in self.neighbors() if n == self.pressed_card), None)
+                    self._dragging_ids = set(self.selected_ids) if item and item['id'] in self.selected_ids else ({item['id']} if item else set())
                 self.offset = max(-200.0, min(200.0, delta.y()))
         self.update()
         self._place_buttons()
@@ -453,10 +489,19 @@ class TaskDeck(QWidget):
                 self.settle_horizontal()
             else:
                 self.settle_horizontal()
-        elif axis == 'vertical' and self.pressed_card == 0 and self.item and abs(delta.y()) >= self.swipe_threshold:
+        elif axis == 'vertical' and self.item and abs(delta.y()) >= self.swipe_threshold:
             self.decide.emit('done' if delta.y() < 0 else 'deleted')
         elif delta.manhattanLength() < 8 and self.item:
-            if self.pressed_card:
+            if self.press_modifiers & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier):
+                self.select_cards.emit(self.pressed_card, self.press_modifiers)
+            elif self.selection_explicit:
+                item = self.item if self.pressed_card == 0 else next(
+                    (item for n, item, _ in self.neighbors() if n == self.pressed_card), None)
+                if item and item['id'] not in self.selected_ids:
+                    self.select_cards.emit(self.pressed_card, Qt.KeyboardModifier.NoModifier)
+                elif self.pressed_card:
+                    self.navigate.emit(self.pressed_card)
+            elif self.pressed_card:
                 self.navigate.emit(self.pressed_card)
                 self.settle_horizontal()
             else:
@@ -467,7 +512,7 @@ class TaskDeck(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.begin_drag(event.position())
+            self.begin_drag(event.position(), event.modifiers())
 
     def mouseMoveEvent(self, event):
         self.drag_to(event.position())
@@ -493,7 +538,11 @@ class TaskDeck(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_Left, Qt.Key.Key_Right):
-            self.navigate.emit(1 if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Right) else -1)
+            direction = 1 if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Right) else -1
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                self.select_cards.emit(direction, event.modifiers())
+            else:
+                self.navigate.emit(direction)
         elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             if self.item:
                 self.expand.emit()

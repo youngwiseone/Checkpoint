@@ -1,13 +1,14 @@
 """A floating screenshot switcher with inline project creation and gesture review."""
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
+from contextlib import contextmanager
 from sqlalchemy import select
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize
+from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal, QSize
 from PySide6.QtGui import QImage, QImageReader, QPixmap, QPainter, QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QProgressBar, QPushButton, QVBoxLayout, QMenu)
 
-from ..services.review import get_work_item, list_work_items, update_work_item
+from ..services.review import get_work_item, list_work_items, update_work_items
 from ..db import read_session, write_session
 from ..models import Capture, Project, Session, Setting
 from ..storage import media_path
@@ -43,6 +44,10 @@ class InboxPanel(QFrame):
         self.setObjectName('inbox')
         self.switcher_backdrop = True
         self.project_id = self.selected_id = self.undo_action = None
+        self.selection = set()
+        self.selection_anchor = None
+        self.selection_explicit = False
+        self._child_depth = 0
         self.frame_index = 0
         self.items = []
         self._direction = 0
@@ -124,6 +129,8 @@ class InboxPanel(QFrame):
         self.deck.navigate.connect(self._step)
         self.deck.jump.connect(self._jump)
         self.deck.decide.connect(self._status)
+        self.deck.select_cards.connect(self._select_cards)
+        self.deck.prepare_group_drag.connect(self._prepare_group_drag)
         self.deck.expand.connect(lambda: self._open(self.selected_id))
         self.deck.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.deck.customContextMenuRequested.connect(self._task_menu)
@@ -177,6 +184,101 @@ class InboxPanel(QFrame):
         self.processing_progress.setTextVisible(False)
         details.addWidget(self.processing_progress)
         self.timer = QTimer(self, interval=1000, timeout=self.refresh)
+        self.deactivate_timer = QTimer(self, interval=80, singleShot=True, timeout=self._hide_if_external_focus)
+        QApplication.instance().applicationStateChanged.connect(self._application_state_changed)
+
+    def _belongs_to_panel(self, widget):
+        while widget is not None:
+            if widget is self:
+                return True
+            widget = widget.parentWidget()
+        return False
+
+    def _hide_if_external_focus(self):
+        if not self.isVisible() or self._child_depth:
+            return
+        if any(dialog.isWindow() and dialog.isVisible() for dialog in self.findChildren(QDialog)):
+            return
+        app = QApplication.instance()
+        if self._belongs_to_panel(app.activeModalWidget()):
+            return
+        if self._belongs_to_panel(app.activePopupWidget()):
+            self.deactivate_timer.start()
+            return
+        if (app.applicationState() == Qt.ApplicationState.ApplicationActive
+                and self._belongs_to_panel(app.activeWindow())):
+            return
+        self.hide()
+
+    def _application_state_changed(self, state):
+        if state == Qt.ApplicationState.ApplicationInactive and self.isVisible():
+            self.deactivate_timer.start()
+
+    def changeEvent(self, event):
+        if hasattr(self, 'deactivate_timer'):
+            if event.type() == QEvent.Type.ActivationChange:
+                if self.isActiveWindow():
+                    self.deactivate_timer.stop()
+                elif self.isVisible():
+                    self.deactivate_timer.start()
+        super().changeEvent(event)
+
+    @contextmanager
+    def _child_window(self):
+        self._child_depth += 1
+        self.deactivate_timer.stop()
+        try:
+            yield
+        finally:
+            self._child_depth -= 1
+            if self.isVisible() and not self.isActiveWindow():
+                self.deactivate_timer.start()
+
+    def _clear_selection(self):
+        self.selection.clear()
+        self.selection_anchor = None
+        self.selection_explicit = False
+
+    def _select_cards(self, relative, modifiers):
+        ids = [item['id'] for item in self.items]
+        if not ids:
+            return
+        index = ids.index(self.selected_id) if self.selected_id in ids else 0
+        target_index = max(0, min(len(ids) - 1, index + relative))
+        target = ids[target_index]
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            anchor = self.selection_anchor if self.selection_anchor in ids else self.selected_id
+            anchor_index = ids.index(anchor) if anchor in ids else index
+            chosen = set(ids[min(anchor_index, target_index):max(anchor_index, target_index) + 1])
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                self.selection.update(chosen)
+            else:
+                self.selection = chosen
+            self.selection_anchor = anchor
+            self.selection_explicit = True
+        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+            self.selection.symmetric_difference_update({target})
+            self.selection_anchor = target
+            self.selection_explicit = True
+        else:
+            self.selection = {target}
+            self.selection_anchor = target
+            self.selection_explicit = False
+        self.selected_id = target
+        self._direction = target_index - index
+        self._present()
+        self._remember_selection()
+
+    def _prepare_group_drag(self, relative):
+        ids = [item['id'] for item in self.items]
+        if self.selected_id not in ids:
+            return
+        target = ids[max(0, min(len(ids) - 1, ids.index(self.selected_id) + relative))]
+        if target not in self.selection:
+            self.selection = {target}
+            self.selection_anchor = target
+            self.selection_explicit = False
+        self._present()
 
     def _layout_toolbar(self):
         wide = self.width() >= 1000
@@ -226,9 +328,26 @@ class InboxPanel(QFrame):
     def _record_menu(self, point):
         menu = QMenu(self)
         menu.addAction('Recording and transcription', self.activity_dialog.exec)
+        menu.addAction('Transcript history', self._transcript_history)
+        menu.addAction('Open transcripts folder', self._transcripts_folder)
         if self.new_session and self.project_id:
             menu.addAction('Start a new session', self._new_session)
-        menu.exec(self.record_button.mapToGlobal(point))
+        with self._child_window():
+            menu.exec(self.record_button.mapToGlobal(point))
+
+    def _transcript_history(self):
+        from .history import HistoryDialog
+        with self._child_window():
+            HistoryDialog(self.project_id, self).exec()
+        self.refresh()
+
+    def _transcripts_folder(self):
+        from ..config import paths
+        folder = paths().transcripts
+        self.hide()
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))):
+            self.show()
+            self._notify(f'Transcripts folder: {folder}')
 
     def _refresh_record_button(self, recording):
         active, paused = bool(recording.get('active')), bool(recording.get('paused'))
@@ -263,7 +382,8 @@ class InboxPanel(QFrame):
         if item_id:
             from .editor import TaskDialog
             self.timer.stop()
-            TaskDialog(item_id, self).exec()
+            with self._child_window():
+                TaskDialog(item_id, self).exec()
             self.refresh()
             if self.isVisible():
                 self.timer.start()
@@ -271,13 +391,17 @@ class InboxPanel(QFrame):
     def _settings(self):
         from .settings import SettingsDialog
         self.timer.stop()
-        if self.open_settings:
-            self.open_settings()
-        else:
-            SettingsDialog(parent=self).exec()
+        previous_project = self.project_id
+        with self._child_window():
+            if self.open_settings:
+                self.open_settings()
+            else:
+                SettingsDialog(parent=self).exec()
         from ..settings_store import get_settings
         recording = self.recording_status() if self.recording_status else {}
         self.project_id = recording.get('project_id') if recording.get('active') else get_settings().last_project_id
+        if previous_project != self.project_id:
+            self._clear_selection()
         self.setStyleSheet(popup_css(colors.current()))
         self.settings_button.setIcon(control_icon('settings'))
         self.close_button.setIcon(control_icon('close'))
@@ -327,6 +451,7 @@ class InboxPanel(QFrame):
         from ..settings_store import update_settings
         self.project_id = pid
         self.selected_id = self.undo_action = None
+        self._clear_selection()
         self._session_signature = None
         self.session_picker.blockSignals(True)
         self.session_picker.setCurrentIndex(0)
@@ -359,7 +484,8 @@ class InboxPanel(QFrame):
         pid = self.project_picker.currentData()
         if not pid or pid == '__new__':
             return
-        name, accepted = get_text(self, 'Rename project', 'Project name', self.project_picker.currentText())
+        with self._child_window():
+            name, accepted = get_text(self, 'Rename project', 'Project name', self.project_picker.currentText())
         if not accepted or not name.strip():
             return
         with write_session() as session:
@@ -389,6 +515,7 @@ class InboxPanel(QFrame):
 
     def _filter_changed(self):
         self.selected_id = None
+        self._clear_selection()
         self.refresh()
 
     def _images(self):
@@ -399,7 +526,9 @@ class InboxPanel(QFrame):
             refresh()
             status = self.status_picker.currentData()
             folder = output_folder(self.project_id, status if status in ('done', 'deleted') else 'open')
+            self.hide()
             if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))):
+                self.show()
                 self._notify(f'Images folder: {folder}')
         except (OSError, ValueError) as error:
             self._notify(str(error))
@@ -410,6 +539,7 @@ class InboxPanel(QFrame):
             return
         if self.project_id != project_id:
             self.selected_id = self.undo_action = None
+            self._clear_selection()
             self._session_signature = None
             self._clear_notice()
         self.project_id = project_id
@@ -506,8 +636,12 @@ class InboxPanel(QFrame):
         self.images_button.setEnabled(bool(self.project_id))
         self.images_button.setText({'done': 'Open done images', 'deleted': 'Open deleted images'}.get(status, 'Open task images'))
         self.images_hint.setText({'done': 'Finished tasks — stored separately from unfinished tasks',
-                                 'deleted': 'Deleted tasks — kept here so you can recover them'}.get(status, '← / → browse · Drag up to finish, down to delete · Drag task images into chat'))
+                                 'deleted': 'Deleted tasks — kept here so you can recover them'}.get(status, 'Shift selects a range · Ctrl toggles a card · Drag up to finish, down to delete'))
         ids = [item['id'] for item in self.items]
+        had_selection = bool(self.selection)
+        self.selection.intersection_update(ids)
+        if not self.selection and (had_selection or self.selected_id not in ids):
+            self._clear_selection()
         if self.selected_id not in ids:
             remembered = self._saved_selection() if self.selected_id is None else None
             if remembered in ids:
@@ -517,6 +651,9 @@ class InboxPanel(QFrame):
             else:
                 self.selected_id = None
             self.frame_index = 0
+        if not self.selection_explicit:
+            self.selection = {self.selected_id} if self.selected_id else set()
+            self.selection_anchor = self.selected_id
         index = ids.index(self.selected_id) if ids else 0
         self.position.setText(f'{len(ids)} cards' if ids else '')
         valid = {(item['id'], item['version']) for item in self.items}
@@ -533,7 +670,9 @@ class InboxPanel(QFrame):
             if 0 <= neighbour < len(self.items):
                 full = self._detail(self.items[neighbour])
                 behind.append((relative, full, self._pixmap(full)))
-        self.deck.present(item, self._pixmap(item) if item else QPixmap(), len(ids), self._direction, behind, ordinal=index + 1 if ids else 0)
+        self.deck.present(item, self._pixmap(item) if item else QPixmap(), len(ids), self._direction, behind,
+                          ordinal=index + 1 if ids else 0, selected_ids=self.selection,
+                          selection_explicit=self.selection_explicit)
         self._direction = 0
         self.deck.preview_loading = bool(self._preview_pending)
         if self.deck.preview_loading and self.deck.isVisible():
@@ -632,6 +771,9 @@ class InboxPanel(QFrame):
         target = max(0, min(len(self.items) - 1, index + delta))
         self._direction = target - index
         self.selected_id = self.items[target]['id']
+        if not self.selection_explicit:
+            self.selection = {self.selected_id}
+            self.selection_anchor = self.selected_id
         self.frame_index = 0
         self._present()
         self._remember_selection()
@@ -639,21 +781,36 @@ class InboxPanel(QFrame):
     def _jump(self, newest):
         if not self.items:
             return
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & (Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.ControlModifier):
+            index = next((i for i, item in enumerate(self.items) if item['id'] == self.selected_id), 0)
+            self._select_cards((len(self.items) - 1 if newest else 0) - index, modifiers)
+            return
         self.selected_id = self.items[-1 if newest else 0]['id']
+        if not self.selection_explicit:
+            self.selection = {self.selected_id}
+            self.selection_anchor = self.selected_id
         self._direction = 0
         self._present()
         self._remember_selection()
 
     def _status(self, value):
-        if not self.selected_id:
+        selected = set(self.selection)
+        before = [item for item in self.items if item['id'] in selected and item['work_status'] != value]
+        if not before:
             return
         try:
-            item = get_work_item(self.selected_id)
-            if item['work_status'] == value:
-                return
-            updated = update_work_item(item['id'], {'work_status': value}, item['version'])
-            self.undo_action = (item['id'], item['work_status'], updated['version'])
-            self._notify({'done': 'Moved to Done.', 'deleted': 'Moved to Deleted.', 'wont_do': 'Archived.', 'open': 'Moved to Open.'}[value], undo=True)
+            updated = update_work_items([(item['id'], {'work_status': value}, item['version']) for item in before])
+            self.undo_action = {
+                'changes': [(item['id'], {'work_status': old['work_status']}, item['version'])
+                            for old, item in zip(before, updated)],
+                'focus': self.selected_id if self.selected_id in selected else before[0]['id'],
+                'selection': set(selected),
+                'explicit': self.selection_explicit,
+            }
+            destination = {'done': 'Done', 'deleted': 'Deleted', 'wont_do': 'Archived', 'open': 'Open'}[value]
+            message = f'Moved to {destination}.' if len(before) == 1 else f'{len(before)} cards moved to {destination}.'
+            self._notify(message, undo=True)
             self.refresh()
         except ValueError as error:
             self._notify(str(error))
@@ -661,11 +818,14 @@ class InboxPanel(QFrame):
     def _undo(self):
         if not self.undo_action:
             return
-        item_id, status, version = self.undo_action
+        action = self.undo_action
         try:
-            update_work_item(item_id, {'work_status': status}, version)
+            update_work_items(action['changes'])
             self.undo_action = None
-            self.selected_id = item_id
+            self.selected_id = action['focus']
+            self.selection = set(action['selection'])
+            self.selection_anchor = self.selected_id
+            self.selection_explicit = action['explicit']
             self._notify('Action undone.')
             self.refresh()
         except ValueError as error:
@@ -679,12 +839,14 @@ class InboxPanel(QFrame):
         menu.addAction('Mark done', lambda: self._status('done'))
         menu.addAction('Reopen', lambda: self._status('open'))
         menu.addAction('Move to Deleted', lambda: self._status('deleted'))
-        menu.exec(self.deck.mapToGlobal(point))
+        with self._child_window():
+            menu.exec(self.deck.mapToGlobal(point))
 
     def hideEvent(self, event):
         self._remember_selection()
         self.timer.stop()
         self.notice_timer.stop()
+        self.deactivate_timer.stop()
         super().hideEvent(event)
 
     def keyPressEvent(self, event):
@@ -695,6 +857,10 @@ class InboxPanel(QFrame):
         elif event.key() == Qt.Key.Key_Delete:
             self._status('deleted')
         elif event.key() in (Qt.Key.Key_Right, Qt.Key.Key_Left):
-            self._step(1 if event.key() == Qt.Key.Key_Right else -1)
+            direction = 1 if event.key() == Qt.Key.Key_Right else -1
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                self._select_cards(direction, event.modifiers())
+            else:
+                self._step(direction)
         else:
             super().keyPressEvent(event)

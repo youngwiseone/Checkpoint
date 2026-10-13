@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+import time
 from typing import Optional
 
 import numpy as np
@@ -60,6 +61,7 @@ class TranscriptionWorker(Worker):
         self.job_audio_s: float = 0.0
         self.model_error: Optional[str] = None
         self._missing_model_notified = False
+        self._last_export_sync = None
 
     # Jobs are eligible when the session allows it: live sessions any time,
     # "after" sessions once ended, "off" only after the user asks.
@@ -82,6 +84,11 @@ class TranscriptionWorker(Worker):
             return (row[0], row[1]) if row else None
 
     def step(self) -> bool:
+        from ..services.transcripts import sync_session_transcripts
+        now = time.monotonic()
+        if self._last_export_sync is None or now - self._last_export_sync >= 15:
+            sync_session_transcripts()
+            self._last_export_sync = now
         st = get_settings().transcription
         if st.paused:
             return False
@@ -114,6 +121,7 @@ class TranscriptionWorker(Worker):
         self.current_job = job_id
         self.job_started = _time.monotonic()
         self.job_audio_s = 0.0
+        session_id = None
         try:
             with write_session() as s:
                 job = s.get(TranscriptionJob, job_id)
@@ -125,6 +133,7 @@ class TranscriptionWorker(Worker):
             with read_session() as s:
                 chunk = s.get(AudioChunk, chunk_id)
                 session = s.get(Session, chunk.session_id)
+                session_id = chunk.session_id
                 project = s.get(Project, session.project_id)
                 prev = None
                 if chunk.contiguous_with_prev:
@@ -184,6 +193,9 @@ class TranscriptionWorker(Worker):
             if self.engine.fallback_message:
                 notices.push("warning", self.engine.fallback_message, "transcription")
         finally:
+            if session_id:
+                from ..services.transcripts import refresh_session_transcript
+                refresh_session_transcript(session_id)
             self.busy = False
             self.current_job = None
             self.job_started = None
