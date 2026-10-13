@@ -35,7 +35,9 @@ Next time, just double-click **start.cmd**. Closing the review window leaves Che
 | Hold **F9** | Open the main menu to review your tasks. |
 | Tap, release, then hold **F9** | Capture on the first tap and record a voice note during the second hold. Release to save (up to 60 seconds). |
 
-For a voice note, make the second press quickly after releasing the first tap, then hold while speaking. A plain hold opens the main menu.
+To record a voice note, **tap F9 and release it, then quickly press F9 again and hold it while speaking**. Release the second press to stop recording and save the voice note. The screenshot comes from the first tap.
+
+**Holding F9 on its own opens the main menu**, replacing the previous triple-tap shortcut.
 
 In the note window, type or click **Dictate note**, then **Save**. Double-tap **F9** any time to edit the last task again, or click **Open menu** in the editor to review your tasks. Closing an edited task keeps your written changes. For dictation, first enable your microphone in **Settings → Audio** and download the speech model in **Settings → Transcript**. It runs offline after download.
 
