@@ -56,10 +56,10 @@ def test_hold_menu_starts_and_replaces_session_for_selected_project(app_env):
     panel._load_projects()
     panel.refresh()
     try:
-        panel.new_session_button.click()
+        panel._new_session()
         first = manager.active.id
         assert manager.active.project_id == panel.project_id
-        panel.new_session_button.click()
+        panel._new_session()
         assert manager.active.id != first
         assert manager.active.project_id == panel.project_id
         with read_session() as session:
@@ -94,7 +94,7 @@ def test_native_settings_save_and_invalid_keys(app_env, monkeypatch):
     assert dialog.result() == QDialog.DialogCode.Accepted
     saved = get_settings()
     assert saved.hotkeys.capture == "F7" and saved.hotkeys.review == ""
-    assert saved.audio.mic_enabled and saved.appearance.theme == "dark"
+    assert saved.audio.mic_enabled and saved.appearance.theme == "light"
     assert saved.last_project_id == pid
     dialog.close()
     dialog = settings_dialog(monkeypatch)

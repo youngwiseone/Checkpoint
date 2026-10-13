@@ -142,7 +142,8 @@ def test_loading_card_tracks_project_work_and_cannot_be_swiped(app_env):
     assert panel.status_picker.width() == panel.session_picker.width()
     assert panel.status_picker.y() == panel.session_picker.y()
     assert abs(panel.session_picker.geometry().center().y() - panel.search.geometry().center().y()) <= 1
-    assert not hasattr(panel, 'record_button') and not hasattr(panel, 'activity_button')
+    assert panel.record_button.isVisible() and not hasattr(panel, 'activity_button')
+    assert not hasattr(panel, 'new_session_button')
     available = app.primaryScreen().availableGeometry().adjusted(12, 12, -12, -12)
     assert panel.geometry() == available
     panel.session_picker.setCurrentIndex(panel.session_picker.findData('__unrecorded__'))

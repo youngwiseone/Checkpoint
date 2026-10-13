@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from .db import read_session, write_session
 from .models import Setting
 
-SETTINGS_VERSION = 5
+SETTINGS_VERSION = 6
 
 
 class HotkeySettings(BaseModel):
@@ -102,8 +102,8 @@ class SharingSettings(BaseModel):
 
 
 class AppearanceSettings(BaseModel):
-    # dark: night blue everywhere (default). light: the airy card look. See theme.py.
-    theme: Literal["dark", "light"] = "dark"
+    # Pearl Glass is the default. The dark palette remains available to integrations.
+    theme: Literal["dark", "light"] = "light"
 
 
 class AppSettings(BaseModel):
@@ -145,6 +145,8 @@ def _upgrade(value: dict) -> dict:
             hk["capture"] = "F9"
         hk["review"] = ""
         value.setdefault("appearance", {})["theme"] = "dark"
+    if value.get("version", 1) < 6:
+        value.setdefault("appearance", {})["theme"] = "light"
     value["version"] = SETTINGS_VERSION
     return value
 

@@ -39,7 +39,7 @@ def surface_path(widget):
     path = QPainterPath()
     deck = getattr(widget, 'deck', None)
     if deck and getattr(widget, 'switcher_backdrop', False):
-        path.addRoundedRect(QRectF(widget.rect()).adjusted(10, 1, -10, -1), 28, 28)
+        path.addRoundedRect(QRectF(widget.rect()).adjusted(10, 1, -10, -1), 36, 36)
     elif deck:
         for child in widget.findChildren(QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly):
             if child.isHidden():
@@ -54,7 +54,7 @@ def surface_path(widget):
                 child_path.addRoundedRect(QRectF(child.geometry()), radius, radius)
                 path = path.united(child_path)
     else:
-        path.addRoundedRect(QRectF(widget.rect()).adjusted(1, 1, -1, -1), 22, 22)
+        path.addRoundedRect(QRectF(widget.rect()).adjusted(1, 1, -1, -1), 30, 30)
     return path
 
 def paint_backdrop(painter, widget):

@@ -12,8 +12,8 @@ export function applyTheme(theme: Theme) {
 
 /** Apply the last known theme before first render so there's no flash. */
 export function applyCachedTheme() {
-  let theme: Theme = "dark";
-  try { if (localStorage.getItem(THEME_KEY) === "light") theme = "light"; } catch { /* default to dark */ }
+  let theme: Theme = "light";
+  try { if (localStorage.getItem(THEME_KEY) === "dark") theme = "dark"; } catch { /* default to Pearl Glass */ }
   document.documentElement.dataset.theme = theme;
 }
 

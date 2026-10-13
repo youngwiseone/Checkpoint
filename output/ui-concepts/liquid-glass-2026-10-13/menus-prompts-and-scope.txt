@@ -1,0 +1,54 @@
+Pearl Glass menus: image-generated design concepts only. Generated with the built-in image_gen tool. No application implementation changes.
+
+Restyle scope retained for later implementation:
+- Apply the approved Pearl Glass style consistently to Settings, Add project, Storage, and the folder chooser.
+- Also restyle Screenshot saved and Edit image in the same style; those screens have not been mocked up in this image-only round.
+
+Prompt set:
+
+1. 05-pearl-glass-settings-general-add-project.png
+
+Use case: ui-mockup.
+Asset type: high-fidelity desktop application menu concept, one landscape image containing the requested dialogs, approximately 2:1 aspect ratio.
+Input images in order: Image 1 is the previously approved PEARL GLASS main Checkpoint screenshot-review concept, with the tall portrait image card, white-glass bottom caption and single-row toolbar; use it as the STYLE authority only. Image 2 is the current Settings General screen and Add project dialog; use it as the functional content/layout authority for the first concept. Image 3 is the current Settings Storage screen and folder selection dialog; use it as the functional content/layout authority for the second concept.
+Primary request: restyle the supplied desktop menus to match the user's approved Pearl Glass aesthetic while preserving their existing functions and recognizable layout. This is an IMAGE-GENERATED DESIGN MOCKUP only.
+Style: beautiful neutral translucent pearl/silver-white glass outer dialog chrome, dark charcoal readable headings and labels, lighter but still readable secondary text, rounded capsule controls, subtle thin glass-edge highlights, soft restrained shadows, near-white frosted content surfaces and input wells. Keep enough pale tint behind text for reliable contrast over bright report backgrounds. Blue primary actions match the approved "Open task images" button. Selected settings tab is a modest pale-blue glass capsule with dark blue text. No dark navy panels or white text on white glass. Add slim neutral-gray inner borders where needed for input clarity. Circular pearl-glass close buttons with dark X. Softly rounded large dialog corners, precisely spaced content and modern sans-serif typography. Keep efficient DESKTOP control sizes, not giant mobile controls.
+Background: the same bright white report with softened orange horizontal header and green charts, heavily softened under these dialogs. A faint tall portrait screenshot card from the underlying app can peek between windows but the menus must dominate. Maintain the bright, neutral context from the approved Pearl Glass design, no wallpaper.
+Important: Preserve labels and actual menu affordances. Do not add settings or redesign app behavior, do not add Apple branding, explanatory callouts, implementation details, legends, aesthetic labels or watermarks. Render one coherent UI screenshot, not a comparison sheet.
+CONCEPT 1 — Settings General and Add project:
+Follow Image 2: a large Settings window at left, approximately 700px wide by 550px tall in a roughly 1200x650 composition; a smaller Add project modal at upper right, approximately 395px wide by 210px tall, just overlapping the Settings edge slightly. Both windows use the approved pale Pearl Glass material. The Add project dialog remains fully visible and all Settings controls remain readable.
+Settings heading exactly "Settings", close circle at top right.
+Immediately below heading a rounded segmented tab strip with labels "General", "Audio", "Transcript", "Chat", "Storage". "General" selected.
+One gently rounded inset light frosted content panel beneath tabs. Rows:
+"Project" label and rounded dropdown "Nees AWS" with chevron.
+Below it a paired row of pale glass actions "Add project" and "Rename".
+"Capture key" label and rounded input "F9".
+Helper copy exactly "Tap: screenshot · Double tap: add text to screenshot · Hold: menu".
+"Screenshot area" label and rounded dropdown "Active display" with chevron.
+Save and Cancel aligned at the bottom right of the main Settings window, outside the inset content panel: "Save" as a restrained blue primary capsule, "Cancel" as neutral pearl glass.
+Small Add project dialog: heading "Add project", circular X at upper right; label "Project name"; single empty light frosted rounded input with visible caret; footer buttons "OK" blue and "Cancel" pale glass. Preserve a focus edge around the project-name input.
+Create a polished practical application screenshot with same controls as Image 2, now light and consistently styled with approved Pearl Glass. There is no recording control inside Settings. Make the complete content fit comfortably without huge empty internal areas.
+
+2. 06-pearl-glass-storage-folder-picker.png
+
+Use case: ui-mockup.
+Asset type: high-fidelity desktop application menu concept, one landscape image containing the requested dialogs, approximately 2:1 aspect ratio.
+Input images in order: Image 1 is the previously approved PEARL GLASS main Checkpoint screenshot-review concept, with the tall portrait image card, white-glass bottom caption and single-row toolbar; use it as the STYLE authority only. Image 2 is the current Settings General screen and Add project dialog; use it as the functional content/layout authority for the first concept. Image 3 is the current Settings Storage screen and folder selection dialog; use it as the functional content/layout authority for the second concept.
+Primary request: restyle the supplied desktop menus to match the user's approved Pearl Glass aesthetic while preserving their existing functions and recognizable layout. This is an IMAGE-GENERATED DESIGN MOCKUP only.
+Style: beautiful neutral translucent pearl/silver-white glass outer dialog chrome, dark charcoal readable headings and labels, lighter but still readable secondary text, rounded capsule controls, subtle thin glass-edge highlights, soft restrained shadows, near-white frosted content surfaces and input wells. Keep enough pale tint behind text for reliable contrast over bright report backgrounds. Blue primary actions match the approved "Open task images" button. Selected settings tab is a modest pale-blue glass capsule with dark blue text. No dark navy panels or white text on white glass. Add slim neutral-gray inner borders where needed for input clarity. Circular pearl-glass close buttons with dark X. Softly rounded large dialog corners, precisely spaced content and modern sans-serif typography. Keep efficient DESKTOP control sizes, not giant mobile controls.
+Background: the same bright white report with softened orange horizontal header and green charts, heavily softened under these dialogs. A faint tall portrait screenshot card from the underlying app can peek between windows but the menus must dominate. Maintain the bright, neutral context from the approved Pearl Glass design, no wallpaper.
+Important: Preserve labels and actual menu affordances. Do not add settings or redesign app behavior, do not add Apple branding, explanatory callouts, implementation details, legends, aesthetic labels or watermarks. Render one coherent UI screenshot, not a comparison sheet.
+CONCEPT 2 — Settings Storage and Data folder chooser:
+Follow Image 3: large Settings window on the left behind a foreground folder-picker dialog extending across the right and lower middle. The foreground chooser is approximately 680px wide by 490px tall in a roughly 1250x680 composition and must be fully visible within the frame, not cropped. Both windows have Pearl Glass chrome, dark text, clear white frosted content interiors.
+Settings heading "Settings" and circular X; same segmented tab strip "General", "Audio", "Transcript", "Chat", "Storage", with "Storage" selected.
+Settings content panel must show:
+label "Data folder"; pale rounded input containing exactly "C:\Users\BlighHedges\AppData\Local\Checkpoint".
+helper text "Your screenshots, audio and transcripts stay on this PC."
+rounded button "Choose data folder for next launch".
+Keep these storage controls visible above or left of the overlapping foreground dialog. Main Settings footer "Save" and "Cancel" if visible.
+Folder picker heading "Data folder for next launch" and circular glass X at upper right.
+A tidy navigation toolbar with "Look in:" label, rounded location field showing "Checkpoint\backend", back and up icon buttons, new-folder icon and view icon buttons.
+Folder browser: rounded light-gray glass sidebar with entries "My Computer" and "BlighHedges", desktop/folder icons; main light frosted file-list area with dark header columns "Name", "Size", "Type", "Date modified". Three folder rows named "checkpoint", "server", "tests", small yellow folder icons, "File folder" under Type, understated realistic dates. Use pale blue for selected row if any. Add delicate separator lines and clear readable file rows, no heavy grid.
+At bottom show "Directory:" with an empty rounded input, and "Files of type:" with rounded dropdown "Directories". Align blue "Choose" and neutral "Cancel" at the right.
+Do not turn this into a Finder window or a phone screen. Retain the current DESKTOP folder chooser's functions while giving it the same neutral pearl materials and blue accents as the approved main UI.
+No annotation overlays, no duplicate Add project window. One coherent mockup illustrating both Storage Settings and the chooser.

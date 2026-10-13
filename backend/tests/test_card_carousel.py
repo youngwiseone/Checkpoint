@@ -129,7 +129,7 @@ def test_caption_edits_and_wide_horizontal_drag_can_skip_two_cards():
     widget.expand.connect(lambda: edits.append(True))
     widget.navigate.connect(navigated.append)
     widget.decide.connect(decisions.append)
-    caption = QPointF(widget.card_rect().center().x(), widget.card_rect().bottom() + 15)
+    caption = QPointF(widget.card_rect().center().x(), widget.card_rect().bottom() - 20)
     widget.begin_drag(caption)
     widget.end_drag(caption)
     assert edits == [True]

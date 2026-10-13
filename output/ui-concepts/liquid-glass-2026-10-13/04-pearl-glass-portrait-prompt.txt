@@ -1,0 +1,39 @@
+Revised Pearl Glass concept. Generated with the built-in image_gen tool; no app code changes.
+Reference inputs: user's attached Pearl Glass concept and original Checkpoint app screenshot.
+
+Use case: ui-mockup.
+Asset type: one high-fidelity landscape desktop app concept, approximately 16:9.
+Input images: Image 1 is the user's approved PEARL GLASS concept, the visual material/style reference and the primary edit target. Image 2 is the actual current Checkpoint app screenshot, the authoritative reference for the CENTRAL TALL PORTRAIT SCREENSHOT CARD SIZE, PROPORTIONS, PLACEMENT AND SCREENSHOT CONTENT. Merge the approved Pearl Glass finish with the current app's tall screenshot card and the user's precise layout changes below.
+
+Primary request: create one revised Pearl Glass screenshot-review overlay concept. Preserve Image 1's bright white blurred business-report background, orange report header and green charts, large translucent pale pearl outer shell, dark charcoal typography, thin glass rims, restrained soft shadows and blue primary action. This is a desktop app design mockup, not a phone device or photograph.
+
+Critical central-card geometry:
+The old Pearl concept's LANDSCAPE form preview must become a NARROW TALL PORTRAIT screenshot card, matching the original current app in Image 2: width to height approximately 0.59, about 300-325 px wide by 520-555 px tall in a 1916 x 1027 composition. Scale this proportion consistently to the output resolution. It should occupy about 16-18% of the entire image width and 52-57% of the entire image height, centered horizontally, with ample whitespace on both sides. Single flat screenshot tile, rounded corners and thin pale glass rim with a subtle realistic shadow. No phone casing, speaker, notch, device bezel or hand. Inside it retain the actual original screenshot's narrow white vertically stacked web data-entry fields, dark browser header, and expanded delivery-vehicle dropdown list; do not replace it with a two-column landscape form. Match the portrait form from Image 2 as closely as possible.
+
+Task text:
+Remove the detached pill that currently puts "Change Suggested Delivery Vehicle to Type" above the image. Instead place the task note ON TOP OF THE SCREENSHOT CARD ITSELF across its BOTTOM 18-22%, within the card's rounded outline, like the current image's hover note overlay but ALWAYS VISIBLE. This bottom overlay is beautiful milky white frosted Pearl Glass with strong enough pale tint for DARK CHARCOAL text to remain readable. It softly blurs the screenshot beneath only within the caption. Render exactly "Change Suggested Delivery Vehicle to Type" as a clean compact 3-line caption with comfortable padding. The caption is superimposed on the lower image area, not an extra detached card or a footer increasing the card's height.
+Place only a small "1 / 1" counter in a separate small pale glass capsule above the card, with no task title outside the card.
+Remove the entire separate "Click to edit" text button and do not render those words anywhere. Replace it with one small circular pearl-glass EDIT BUTTON containing a crisp dark pencil icon, anchored ON the screenshot card at its TOP RIGHT, inset from the card's edge. It floats over the screenshot as a compact glass circle, around 36-42 px diameter in the 1916px composition. No other pencil button.
+
+Top toolbar:
+Consolidate ALL main controls into ONE HORIZONTAL ROW across the top of the outer Pearl Glass shell. In left-to-right order:
+1. moderately sized rounded project picker with small blue folder icon, dark text "Nees AWS" and chevron;
+2. rounded search field with search icon and placeholder "Search tasks";
+3. compact rounded status picker "Open" with chevron;
+4. compact rounded session picker "All sessions" with chevron;
+5. circular glass gear SETTINGS button;
+6. circular glass RECORD button immediately to the RIGHT of settings;
+7. circular glass CLOSE button with X at the far right.
+Project picker must no longer span almost the whole row. Search and Open sit immediately right of the project picker.
+Replace "New session" completely with the record control; NO "New session" words and NO plus button. Show the record control in ACTIVE RECORDING state: a distinct solid RED small circle centered inside a milky circular glass button, with a restrained red inner halo/tint. It is clearly different from the dark gear and dark X. User's intended behavior is neutral when idle, red after click; depict the red recording state in this single static mockup.
+Keep this toolbar elegantly spaced, all controls fit inside shell. Do not add a second toolbar row.
+
+Other elements:
+Retain "Oldest" and left chevron in a pale glass pill at the left of the canvas, and "Newest" with right chevron at the right, centered vertically near the middle of the tall card.
+Retain the rounded blue bottom primary button with image icon and exact label "Open task images", centered beneath the portrait card with a clear gap.
+Retain small dark-gray helper copy "Shift+Tab focus · Drag task images into cards" beneath that button, inside the shell.
+Keep generous spacing while fitting the tall card between toolbar and bottom button. Portrait card is the focal point but only one narrow column, never widen it to fill available whitespace.
+Do not introduce new panels, logos, tooltips, editorial labels, multiple frames or side-by-side mockups.
+
+Style invariants:
+Closely preserve the original approved Pearl Glass aesthetic: neutral translucent silver-white/milky materials, readable dark text, fine reflected edge highlights, soft background blur and blue only for the folder and primary image-opening button. Red only for active record control. Do not switch to dark smoked glass, heavy saturated colors, all-white unreadable text or a flat opaque white window. Make the output feel like a plausible refinement of Image 1, with the center card from Image 2.

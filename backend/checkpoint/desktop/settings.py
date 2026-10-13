@@ -33,17 +33,19 @@ class SettingsDialog(GlassDialog):
         super().__init__(parent)
         self.rebind = rebind
         self.setWindowTitle("Settings")
-        self.resize(580, 560)
+        self.resize(720, 560)
         self.setStyleSheet(popup_css(colors.current()))
         st = get_settings()
         layout = self.content_layout()
-        tabs = QTabWidget()
+        tabs = self.tabs = QTabWidget()
+        tabs.tabBar().setExpanding(False)
         layout.addWidget(tabs)
 
         def tab(name):
             widget = QWidget()
+            widget.setObjectName('settingsPage')
             form = QFormLayout(widget)
-            form.setContentsMargins(16, 18, 16, 18)
+            form.setContentsMargins(18, 22, 18, 22)
             form.setVerticalSpacing(18)
             form.setHorizontalSpacing(20)
             tabs.addTab(widget, name)
@@ -61,6 +63,7 @@ class SettingsDialog(GlassDialog):
         self.capture_key = QLineEdit(st.hotkeys.capture)
         general.addRow("Capture key", self.capture_key)
         hint = QLabel("Tap: screenshot · Double tap: add text to screenshot · Hold: menu")
+        hint.setObjectName('muted')
         hint.setWordWrap(True)
         general.addRow(hint)
         self.region = combo([("Active display", "foreground_monitor"), ("Active window", "foreground_window")], st.capture.region)
@@ -87,7 +90,9 @@ class SettingsDialog(GlassDialog):
         audio.addRow("Microphone", self.mic_device)
         audio.addRow(self.loopback)
         audio.addRow("Computer audio", self.loop_device)
-        audio.addRow(QLabel("Saved choices apply to the next recording."))
+        audio_hint = QLabel("Saved choices apply to the next recording.")
+        audio_hint.setObjectName('muted')
+        audio.addRow(audio_hint)
         if devices.get("error"):
             warning = QLabel(devices["error"])
             warning.setWordWrap(True)
@@ -98,6 +103,7 @@ class SettingsDialog(GlassDialog):
         self.model = combo([(f"{name} (~{info['approx_mb']} MB)", name) for name, info in MODEL_CHOICES.items()], st.transcription.model)
         transcription.addRow("Local model", self.model)
         self.model_status = QLabel()
+        self.model_status.setObjectName('muted')
         self.model_status.setWordWrap(True)
         transcription.addRow(self.model_status)
         self.download = QPushButton("Download selected model")
@@ -130,7 +136,10 @@ class SettingsDialog(GlassDialog):
         folder = QLineEdit(str(paths().root))
         folder.setReadOnly(True)
         storage.addRow("Data folder", folder)
-        storage.addRow(QLabel("Your screenshots, audio and transcripts stay on this PC."))
+        storage_hint = QLabel("Your screenshots, audio and transcripts stay on this PC.")
+        storage_hint.setObjectName('muted')
+        storage_hint.setWordWrap(True)
+        storage.addRow(storage_hint)
         choose = QPushButton("Choose data folder for next launch")
         choose.clicked.connect(self._storage)
         storage.addRow(choose)
@@ -142,6 +151,7 @@ class SettingsDialog(GlassDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName('primary')
         layout.addWidget(buttons)
 
     def _add_project(self):
@@ -215,7 +225,6 @@ class SettingsDialog(GlassDialog):
             if review and parse(review) == capture_binding:
                 raise ValueError("Capture and review must use different keys. Leave review empty to use only one key.")
             update_settings({"last_project_id": self.project.currentData(), "first_run_complete": True,
-                             "appearance": {"theme": "dark"},
                              "hotkeys": {"capture": capture, "review": review},
                              "capture": {"region": self.region.currentData()},
                              "audio": {"mic_enabled": self.mic.isChecked(), "mic_device": self.mic_device.currentData(),

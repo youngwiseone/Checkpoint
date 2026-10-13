@@ -19,75 +19,15 @@ from PySide6.QtWidgets import (
 
 from ..capture import win32
 from . import colors
-from .colors import Colors, css
+from .colors import css
+from .icons import control_icon
+from .backdrop import capture_backdrop, paint_backdrop
 
-RADIUS = 18  # matches the feel of the overlay's cards
+from .styles import note_css, popup_css
 
-
-def note_css(c: Colors) -> str:
-    """The note window in the current theme: a night-blue card, or the light card look."""
-    return f"""
-QWidget#root {{ background: {css(colors.alpha(c.card, 210))}; border: 1px solid {css(c.border)}; border-radius: {RADIUS}px; }}
-QLabel {{ color: {css(c.text)}; font-size: 15px; }}
-QLabel#muted {{ color: {css(c.muted)}; font-size: 13px; }}
-QLabel#title {{ font-size: 16px; font-weight: 600; }}
-QLabel#error {{ color: {css(c.danger)}; font-size: 13px; }}
-QLabel#thumb {{ background: {css(c.field)}; border: 1px solid {css(c.border)}; border-radius: 10px; }}
-QPlainTextEdit {{ background: {css(c.field)}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 10px; padding: 8px;
-                  font-size: 15px; selection-background-color: {css(c.accent)}; selection-color: {css(c.on_accent)}; }}
-QPlainTextEdit:focus {{ border: 1px solid {css(c.accent)}; }}
-QComboBox {{ background: {css(c.button)}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 10px; padding: 5px 10px;
-             font-size: 14px; }}
-QComboBox:focus {{ border: 1px solid {css(c.accent)}; }}
-QComboBox::drop-down {{ border: none; width: 28px; }}
-QComboBox::down-arrow {{ image: url({colors.arrow_icon(c.muted)}); width: 10px; height: 6px; margin-right: 6px; }}
-QComboBox QAbstractItemView {{ background: {css(c.surface_2)}; color: {css(c.text)}; selection-background-color: {css(c.accent)};
-                               selection-color: {css(c.on_accent)}; }}
-QPushButton {{ background: {css(c.button)}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 10px; padding: 7px 14px;
-               font-size: 14px; }}
-QPushButton:hover {{ border-color: {css(c.border_strong)}; }}
-QPushButton:focus {{ border: 1px solid {css(c.accent)}; }}
-QPushButton#primary {{ background: {css(c.accent)}; border-color: {css(c.accent)}; color: {css(c.on_accent)}; font-weight: 600; }}
-QPushButton#primary:hover {{ background: {css(c.accent_strong)}; border-color: {css(c.accent_strong)}; }}
-QPushButton#danger {{ color: {css(c.danger)}; }}
-"""
 
 CATEGORIES = [("", "No category"), ("bug", "Bug"), ("improvement", "Improvement"), ("idea", "Idea"),
               ("task", "Task"), ("question", "Question"), ("note", "Note")]
-
-
-def popup_css(c: Colors) -> str:
-    return note_css(c) + f"""
-QWidget {{ color: {css(c.text)}; font-family: 'Segoe UI'; font-size: 14px; }}
-QDialog, QFrame#inbox {{ background: transparent; border: none; }}
-QTabWidget::pane, QListWidget, QFrame#activityCard, QFrame#controlPill {{ background: {css(colors.alpha(c.card, 205))}; color: {css(c.text)}; border: 1px solid {css(colors.alpha(c.focus, 75))}; border-radius: 16px; }}
-QTabWidget::pane {{ padding: 18px; }}
-QTabWidget::pane QWidget {{ background: transparent; }}
-QAbstractItemView, QComboBox QAbstractItemView, QTabWidget::pane QAbstractItemView {{ background: {css(c.surface_2)}; color: {css(c.text)}; alternate-background-color: {css(c.card)}; selection-background-color: {css(c.accent)}; selection-color: {css(c.on_accent)}; }}
-QAbstractItemView::item:selected {{ background: {css(c.accent)}; color: {css(c.on_accent)}; }}
-QHeaderView::section {{ background: {css(c.surface_3)}; color: {css(c.text)}; padding: 6px; border: none; }}
-QMenu {{ background: {css(c.surface_2)}; color: {css(c.text)}; }}
-QMenu::item:selected {{ background: {css(c.accent)}; color: {css(c.on_accent)}; }}
-QScrollArea {{ background: transparent; border: none; }}
-QScrollArea > QWidget > QWidget {{ background: transparent; }}
-QLabel {{ background: transparent; }}
-QLineEdit, QSpinBox, QPlainTextEdit {{ background: {css(colors.alpha(c.field, 210))}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 10px; padding: 9px; }}
-QComboBox, QPushButton {{ background: {css(colors.alpha(c.button, 205))}; }}
-QPushButton:hover {{ background: {css(colors.alpha(c.selected, 205))}; border-color: {css(c.focus)}; }}
-QPushButton:pressed {{ background: {css(c.selected)}; padding-top: 9px; padding-bottom: 5px; }}
-QListWidget::item {{ padding: 12px; border-bottom: 1px solid {css(c.border)}; }}
-QListWidget::item:selected {{ background: {css(c.selected)}; }}
-QScrollBar:vertical {{ width: 7px; background: transparent; margin: 3px; }}
-QScrollBar::handle:vertical {{ background: {css(c.border_strong)}; border-radius: 3px; min-height: 20px; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-QCheckBox {{ color: {css(c.text)}; padding: 4px; }}
-QTabBar::tab {{ background: transparent; color: {css(c.muted)}; padding: 12px 16px; border-radius: 10px; margin: 3px; }}
-QTabBar::tab:selected {{ background: {css(c.selected)}; color: {css(c.text)}; }}
-QProgressBar {{ background: {css(c.field)}; border: 1px solid {css(c.border)}; border-radius: 5px; min-height: 10px; max-height: 10px; }}
-QProgressBar::chunk {{ background: {css(c.accent)}; border-radius: 5px; }}
-QPushButton:disabled {{ color: {css(c.faint)}; background: {css(c.surface)}; }}
-"""
 
 
 def logical_point_for_physical(x: int, y: int) -> QPoint:
@@ -138,10 +78,21 @@ class NoteWindow(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(root)
         lay = QVBoxLayout(root)
-        lay.setContentsMargins(18, 16, 18, 16)
-        lay.setSpacing(10)
+        lay.setContentsMargins(24, 22, 24, 22)
+        lay.setSpacing(12)
         self.heading = QLabel("Screenshot saved")
         self.heading.setObjectName("title")
+        header = QHBoxLayout()
+        header.addWidget(self.heading, 1)
+        self.close_button = QPushButton()
+        self.close_button.setObjectName('glassCircle')
+        self.close_button.setIcon(control_icon('close'))
+        self.close_button.setFixedSize(44, 44)
+        self.close_button.setAccessibleName('Close note and keep screenshot for later')
+        self.close_button.setToolTip('Keep for later')
+        self.close_button.clicked.connect(self._keep)
+        header.addWidget(self.close_button)
+        lay.addLayout(header)
         self.sub = QLabel("")
         self.sub.setObjectName("muted")
         self.sub.setWordWrap(True)
@@ -179,21 +130,23 @@ class NoteWindow(QWidget):
         btns = QHBoxLayout()
         self.discard_btn = QPushButton("Discard")
         self.discard_btn.setObjectName("danger")
-        self.keep_btn = QPushButton("Keep for later  (Esc)")
-        self.save_btn = QPushButton("Save  (Ctrl+Enter)")
+        self.keep_btn = QPushButton("Keep for later")
+        self.keep_btn.setToolTip('Keep for later (Esc)')
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setToolTip('Save (Ctrl+Enter)')
         self.save_btn.setObjectName("primary")
         btns.addWidget(self.discard_btn)
         btns.addStretch(1)
         btns.addWidget(self.keep_btn)
         btns.addWidget(self.save_btn)
-        for w in (self.heading, self.sub, self.thumb, self.edit_image_btn, self.prompt, self.text):
+        for w in (self.sub, self.thumb, self.edit_image_btn, self.prompt, self.text):
             lay.addWidget(w)
         lay.addWidget(self.mic_btn)
         lay.addWidget(self.dictation_status)
         lay.addLayout(row)
         lay.addWidget(self.error)
         lay.addLayout(btns)
-        self.setFixedWidth(440)
+        self.setFixedWidth(480)
         self.save_btn.clicked.connect(self._save)
         self.keep_btn.clicked.connect(self._keep)
         self.discard_btn.clicked.connect(self._discard)
@@ -228,23 +181,31 @@ class NoteWindow(QWidget):
                 self.thumb.setPixmap(pix.scaled(404, 168, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
             self.thumb.show()
             self.edit_image_btn.show()
-            self.keep_btn.setText("Keep for later  (Esc)")
+            self.keep_btn.setText("Keep for later")
             self.discard_btn.show()
         else:
             self.heading.setText("Quick note")
             self.sub.setText("A text-only note, no screenshot.")
             self.thumb.hide()
             self.edit_image_btn.hide()
-            self.keep_btn.setText("Cancel  (Esc)")
+            self.keep_btn.setText("Cancel")
             self.discard_btn.hide()
         self._fit()
         self._place(payload.get("work_rect"))
+        self.backdrop = capture_backdrop(self)
         self.show()
         win32.exclude_from_capture(int(self.winId()))
         self.raise_()
         self.activateWindow()
         win32.restore_foreground(int(self.winId()))
         self.text.setFocus()
+
+    def paintEvent(self, event):
+        from .glass import paint_glass
+        painter = QPainter(self)
+        paint_backdrop(painter, self)
+        paint_glass(painter, self.rect().adjusted(1, 1, -1, -1), colors.current(), radius=30)
+        painter.end()
 
     def _edit_image(self) -> None:
         capture_id = self.payload.get("id")
@@ -413,12 +374,10 @@ class Toast(QWidget):
         self.level = "info"
 
     def paintEvent(self, _e) -> None:  # noqa: ANN001, N802
+        from .glass import paint_glass
         c = colors.current()
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(c.card)
-        p.setPen(c.border)
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 14, 14)
+        paint_glass(p, self.rect().adjusted(1, 1, -1, -1), c, radius=20)
         p.setBrush({"success": c.success, "warning": c.warn, "error": c.danger}.get(self.level, c.accent))
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(14, self.height() // 2 - 5, 10, 10)

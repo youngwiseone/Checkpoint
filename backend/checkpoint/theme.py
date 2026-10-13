@@ -1,7 +1,7 @@
 """Colour themes shared by every Checkpoint surface: the web app, the native note window and
 toasts, the review overlay (Ctrl+F9) and the project switcher (Shift+F9).
 
-"dark" is the default night-blue theme; "light" is the airy card look. The web app mirrors these
+"light" is the default Pearl Glass theme; "dark" is the night-blue alternative. The web app mirrors these
 values as CSS variables in frontend/src/styles.css, so keep the two in step when changing one.
 """
 
@@ -35,24 +35,24 @@ PALETTES: dict[str, dict[str, str]] = {
         "shadow": "#000000",
     },
     "light": {
-        "bg": "#eef1f7",
-        "surface": "#f8f9fc",
+        "bg": "#e9edf2",
+        "surface": "#f7f8fa",
         "surface_2": "#ffffff",
-        "surface_3": "#e9edf5",
-        "border": "#dde3ee",
-        "border_strong": "#c6cfdf",
-        "text": "#151821",
-        "text_2": "#3d4454",
-        "muted": "#6b7280",
-        "faint": "#9aa1ae",
-        "accent": "#4f7bff",
-        "accent_strong": "#3a66f0",
+        "surface_3": "#eef1f5",
+        "border": "#d7dce5",
+        "border_strong": "#bdc5d2",
+        "text": "#171d2b",
+        "text_2": "#343c4b",
+        "muted": "#5f6878",
+        "faint": "#8992a0",
+        "accent": "#2582ff",
+        "accent_strong": "#1468e8",
         "success": "#16a05a",
         "warn": "#c27c0e",
         "danger": "#e5484d",
-        "card": "#f8f9fc",
-        "pill": "#ffffffec",
-        "selected": "#eef2ff",
+        "card": "#f7f9fc",
+        "pill": "#ffffffed",
+        "selected": "#dde9ff",
         "shadow": "#141821",
     },
 }
@@ -62,12 +62,12 @@ def current() -> str:
     from .settings_store import get_settings
 
     name = get_settings().appearance.theme
-    return name if name in PALETTES else "dark"
+    return name if name in PALETTES else "light"
 
 
 def palette(name: str | None = None) -> dict[str, str]:
     """Colour hex strings for a theme (the current one by default). #rrggbbaa carries alpha."""
-    return PALETTES.get(name or current(), PALETTES["dark"])
+    return PALETTES.get(name or current(), PALETTES["light"])
 
 
 def is_dark(name: str | None = None) -> bool:

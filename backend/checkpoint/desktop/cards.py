@@ -1,11 +1,17 @@
 """Floating image cards with a snapping carousel and axis-locked decisions."""
 import time
+from collections import OrderedDict
+
+from PIL import Image
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFont, QTextLayout, QTextOption, QPainter, QPainterPath, QPen, QPixmap, QTransform
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QTextLayout, QTextOption, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import QWidget, QPushButton
 
 from . import colors
+from .backdrop import frosted_image
+from .glass import paint_glass
+from .icons import control_icon
 from ..services.review import visible_context
 
 
@@ -20,8 +26,18 @@ class TaskDeck(QWidget):
         self.oldest_button = QPushButton('Oldest', self)
         self.newest_button = QPushButton('Newest', self)
         for button, newest in ((self.oldest_button, False), (self.newest_button, True)):
-            button.setFixedSize(84, 34)
+            button.setFixedSize(112, 44)
+            button.setIcon(control_icon('right' if newest else 'left'))
             button.clicked.connect(lambda checked=False, newest=newest: self.jump.emit(newest))
+        self.edit_button = QPushButton(self)
+        self.edit_button.setObjectName('glassCircle')
+        self.edit_button.setFixedSize(44, 44)
+        self.edit_button.setIcon(control_icon('pencil'))
+        self.edit_button.setAccessibleName('Edit task')
+        self.edit_button.setToolTip('Edit task and screenshot')
+        self.edit_button.clicked.connect(self.expand.emit)
+        self.edit_button.hide()
+        self._caption_previews = OrderedDict()
         self.item = None
         self.image = QPixmap()
         self.count = 0
@@ -73,9 +89,8 @@ class TaskDeck(QWidget):
     def _paint_loading(self, painter):
         rect = self._loading_rect()
         painter.save()
-        painter.setPen(QPen(QColor(255, 255, 255, 65), 1))
-        painter.setBrush(QColor(18, 28, 44, 215))
-        painter.drawRoundedRect(rect, 24, 24)
+        c = colors.current()
+        paint_glass(painter, rect, c, radius=24)
         content = rect.adjusted(18, 0, -18, 0)
         if self.item:
             # Keep the label inside the exposed portion of a side loading card.
@@ -86,7 +101,7 @@ class TaskDeck(QWidget):
                 if other.left() <= rect.right() <= other.right():
                     content.setRight(min(content.right(), other.left() - 14))
         spinner = QRectF(content.center().x() - 18, rect.center().y() - 50, 36, 36)
-        painter.setPen(QPen(QColor('white'), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setPen(QPen(c.text, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawArc(spinner, self.spinner_angle * 16, 260 * 16)
         painter.setFont(QFont('Segoe UI', 11))
         painter.drawText(QRectF(content.left(), rect.top() + rect.height() * .52, content.width(), rect.height() * .48 - 24),
@@ -113,12 +128,14 @@ class TaskDeck(QWidget):
     def _animate(self, value):
         if value is not None:
             self.offset = float(value)
+            self._place_buttons()
             self.update()
             self._update_mask()
 
     def _animate_horizontal(self, value):
         if value is not None:
             self.horizontal_offset = float(value)
+            self._place_buttons()
             self.update()
             self._update_mask()
 
@@ -157,43 +174,73 @@ class TaskDeck(QWidget):
             else:
                 self.horizontal_animation.stop()
                 self.horizontal_offset = 0.0
+        self._place_buttons()
         self.update()
 
-    def _title_layout(self):
-        width = min(560, max(120, self.width() - 70))
-        layout = QTextLayout((self.item or {}).get('title', ''), QFont('Segoe UI', 11, QFont.Weight.DemiBold))
+    def _base_rect(self):
+        height = max(120, min(540, self.height() - 72))
+        width = min(320, max(100, self.width() - 170), height * .6)
+        top = (self.height() - height) / 2 + 16
+        return QRectF((self.width() - width) / 2, top, width, height)
+
+    @staticmethod
+    def _caption_text(item):
+        title = item.get('title', '')
+        context = visible_context(item)
+        if context.startswith(title) and title:
+            return context
+        return '\n\n'.join(part for part in (title, context) if part)
+
+    def _caption_layout(self, rect, item, expanded=False):
+        font = QFont('Segoe UI', 14, QFont.Weight.DemiBold)
+        metrics = QFontMetricsF(font)
+        text = self._caption_text(item).replace('\n', '\u2028')
+        layout = QTextLayout(text, font)
         option = QTextOption()
         option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
-        option.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         layout.setTextOption(option)
+        width = max(1, rect.width() - 32)
+        limit = max(1, int((rect.height() * (.55 if expanded else .35) - 32) / metrics.lineSpacing()))
+        if not expanded:
+            limit = min(3, limit)
         layout.beginLayout()
-        height = 0
-        while True:
+        lines = []
+        while len(lines) <= limit:
             line = layout.createLine()
             if not line.isValid():
                 break
             line.setLineWidth(width)
-            line.setPosition(QPointF(0, height))
-            height += line.height()
+            lines.append((line.textStart(), line.textLength()))
         layout.endLayout()
-        return layout, width, max(24, height + 4)
-
-    def _title_size(self):
-        _, width, height = self._title_layout()
-        return width, height
-
-    def _base_rect(self):
-        _, title_height = self._title_size()
-        header = title_height + 38
-        height = max(120, min(540, self.height() - header - 42))
-        width = min(320, self.width() - 90, height * .64)
-        top = (self.height() - height - header - 34) / 2 + header
-        return QRectF((self.width() - width) / 2, top, width, height)
+        visible = [text[start:start + length].strip() for start, length in lines[:limit]]
+        if len(lines) > limit and visible:
+            start = lines[limit - 1][0]
+            remaining = text[start:].replace('\u2028', ' ')
+            visible[-1] = metrics.elidedText(remaining, Qt.TextElideMode.ElideRight, width)
+        height = max(58, len(visible) * metrics.lineSpacing() + 32)
+        panel = QRectF(rect.x(), rect.bottom() - height, rect.width(), height)
+        return panel, visible, font, metrics.lineSpacing()
 
     def focused_title_rect(self):
-        rect = self.card_rect()
-        width, height = self._title_size()
-        return QRectF(rect.center().x() - width / 2, rect.top() - height - 8, width, height)
+        return self._caption_layout(self.card_rect(), self.item or {})[0]
+
+    def _frosted_preview(self, image, rect):
+        key = (image.cacheKey(), int(rect.width()), int(rect.height()))
+        if key not in self._caption_previews:
+            source = self.image_source_rect(image, rect).toAlignedRect()
+            preview = image.copy(source).scaled(key[1], key[2], Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                Qt.TransformationMode.SmoothTransformation)
+            qimage = preview.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+            pixels = Image.frombytes('RGBA', (qimage.width(), qimage.height()), bytes(qimage.constBits()),
+                                     'raw', 'RGBA', qimage.bytesPerLine())
+            blurred = frosted_image(pixels, (key[1], key[2]))
+            data = blurred.tobytes()
+            self._caption_previews[key] = QPixmap.fromImage(QImage(data, key[1], key[2], key[1] * 3,
+                                                                  QImage.Format.Format_RGB888).copy())
+        self._caption_previews.move_to_end(key)
+        while len(self._caption_previews) > 16:
+            self._caption_previews.popitem(last=False)
+        return self._caption_previews[key]
 
     def card_spacing(self):
         return self._base_rect().width() * .76
@@ -242,9 +289,7 @@ class TaskDeck(QWidget):
         clip.addRect(QRectF(self.rect()))
         front = QPainterPath()
         front.addRoundedRect(rect, 24, 24)
-        title = self.focused_title_rect()
-        front.addRect(title.adjusted(-6, -26, 6, 8))
-        front.addRect(QRectF(rect.x() - 3, rect.bottom(), rect.width() + 6, 34))
+        front.addRect(QRectF(rect.center().x() - 48, rect.top() - 42, 96, 34))
         for back, _, item, image in self.back_cards():
             painter.save()
             painter.setClipPath(clip.subtracted(front))
@@ -262,14 +307,16 @@ class TaskDeck(QWidget):
             painter.drawRoundedRect(badge, 12, 12)
             painter.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
             painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, decision)
-        painter.setPen(QColor(255, 255, 255, 190))
-        painter.setFont(QFont('Segoe UI', 10))
         painter.end()
 
     def _place_buttons(self):
-        y = int(self._base_rect().center().y()) - 17
+        y = int(self._base_rect().center().y()) - 22
         self.oldest_button.move(4, y)
-        self.newest_button.move(self.width() - 88, y)
+        self.newest_button.move(self.width() - 116, y)
+        rect = self.card_rect()
+        self.edit_button.move(int(rect.right() - 52), int(rect.top() + 8))
+        self.edit_button.setVisible(bool(self.item) and self.press is None)
+        self.edit_button.raise_()
 
     def resizeEvent(self, event):
         self._place_buttons()
@@ -293,28 +340,18 @@ class TaskDeck(QWidget):
     def _paint_card(self, painter, rect, item, image, c, back=False):
         painter.save()
         painter.setPen(Qt.PenStyle.NoPen)
-        for spread in (10, 6, 2):
-            painter.setBrush(QColor(0, 0, 0, 14))
+        for spread in (8, 4, 2):
+            painter.setBrush(QColor(24, 34, 50, 12))
             painter.drawRoundedRect(rect.adjusted(-spread, spread, spread, spread * 2), 24, 24)
-        painter.setFont(QFont('Segoe UI', 11, QFont.Weight.DemiBold))
-        painter.setPen(QColor('white'))
-        if back:
-            heading = painter.fontMetrics().elidedText(item['title'], Qt.TextElideMode.ElideRight, int(rect.width()))
-            painter.drawText(QRectF(rect.x(), rect.y() - 31, rect.width(), 24), Qt.AlignmentFlag.AlignCenter, heading)
-        else:
-            title = self.focused_title_rect()
-            layout, _, _ = self._title_layout()
-            layout.draw(painter, title.topLeft())
-            if self.ordinal:
-                painter.setFont(QFont('Segoe UI', 10))
-                painter.drawText(QRectF(title.x(), title.y() - 26, title.width(), 22), Qt.AlignmentFlag.AlignCenter,
-                                 f'{self.ordinal}/{self.count}')
-        painter.setFont(QFont('Segoe UI', 10))
-        painter.drawText(QRectF(rect.x(), rect.bottom() + 7, rect.width(), 23), Qt.AlignmentFlag.AlignCenter,
-                         'Click to focus' if back else 'Click to edit')
+        if not back and self.ordinal:
+            counter = QRectF(rect.center().x() - 42, rect.top() - 40, 84, 30)
+            paint_glass(painter, counter, c, radius=15)
+            painter.setPen(c.text)
+            painter.setFont(QFont('Segoe UI', 10, QFont.Weight.DemiBold))
+            painter.drawText(counter, Qt.AlignmentFlag.AlignCenter, f'{self.ordinal} / {self.count}')
         shape = QPainterPath()
         shape.addRoundedRect(rect, 24, 24)
-        painter.setClipPath(shape)
+        painter.setClipPath(shape, Qt.ClipOperation.IntersectClip)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(c.card)
         painter.drawRect(rect)
@@ -322,32 +359,28 @@ class TaskDeck(QWidget):
             painter.drawPixmap(rect, image, self.image_source_rect(image, rect))
         elif self.preview_loading and any(e['kind'] == 'capture' for e in item.get('evidence', [])):
             painter.setPen(QPen(c.text, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            painter.drawArc(QRectF(rect.center().x() - 16, rect.center().y() - 16, 32, 32), self.spinner_angle * 16, 260 * 16)
-        text = visible_context(item)
-        if text:
-            painter.setFont(QFont('Segoe UI', 10))
-            inset = 16
-            width = rect.width() - inset * 2
-            line = painter.fontMetrics().lineSpacing()
-            expanded = not back and self.pointer is not None and rect.contains(self.pointer)
-            needed = painter.fontMetrics().boundingRect(QRect(0, 0, int(width), 10000), Qt.TextFlag.TextWordWrap, text).height()
-            limit = rect.height() * .55 if expanded else min(rect.height() * .35, line * 2 + inset * 2)
-            note_height = min(limit, needed + inset * 2)
-            if image.isNull():
-                note_height = min(rect.height(), max(note_height, rect.height() * .7))
-            panel = QRectF(rect.x(), rect.bottom() - note_height, rect.width(), note_height)
-            painter.setBrush(QColor(10, 18, 28, 190))
-            painter.drawRect(panel)
-            painter.setPen(QColor('white'))
-            lines = max(1, int((note_height - inset * 2) // line))
-            note = panel.adjusted(inset, inset, -inset, -inset)
-            if expanded or image.isNull():
-                painter.drawText(note, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, text)
-            else:
-                # A compact two-line excerpt; the complete note opens on hover/edit.
-                chars = max(24, int(width / painter.fontMetrics().averageCharWidth()) * lines)
-                snippet = text[:chars].rstrip() + ('…' if len(text) > chars else '')
-                painter.drawText(note, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, snippet)
+            painter.drawArc(QRectF(rect.center().x() - 16, rect.center().y() - 16, 32, 32),
+                            self.spinner_angle * 16, 260 * 16)
+        expanded = not back and self.pointer is not None and rect.contains(self.pointer)
+        panel, lines, font, spacing = self._caption_layout(rect, item, expanded)
+        if lines:
+            painter.save()
+            painter.setClipRect(panel, Qt.ClipOperation.IntersectClip)
+            if not image.isNull():
+                preview = self._frosted_preview(image, rect)
+                painter.drawPixmap(rect, preview, QRectF(preview.rect()))
+            paint_glass(painter, panel, c, radius=16, strength=1.04)
+            painter.setPen(c.text)
+            painter.setFont(font)
+            for index, text in enumerate(lines):
+                line = QRectF(panel.left() + 16, panel.top() + 16 + index * spacing,
+                              panel.width() - 32, spacing)
+                painter.drawText(line, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+            painter.restore()
+        painter.setClipping(False)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(colors.alpha(c.surface_2, 220), 2))
+        painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 23, 23)
         painter.restore()
 
     def enterEvent(self, event):
@@ -360,11 +393,11 @@ class TaskDeck(QWidget):
         self.update()
 
     def _hit_card(self, point):
-        if self.item and self.card_rect().adjusted(0, 0, 0, 32).contains(point):
+        if self.item and self.card_rect().contains(point):
             return 0
         # Paint order establishes which exposed card receives a click.
         for relative, _, _ in sorted(self.neighbors(), key=lambda entry: abs(entry[0])):
-            if self._neighbor_rect(relative).adjusted(0, 0, 0, 32).contains(point):
+            if self._neighbor_rect(relative).contains(point):
                 return relative
         return None
 
@@ -400,6 +433,7 @@ class TaskDeck(QWidget):
             elif self.axis == 'vertical' and self.pressed_card == 0:
                 self.offset = max(-200.0, min(200.0, delta.y()))
         self.update()
+        self._place_buttons()
         self._update_mask()
 
     def end_drag(self, point):
@@ -428,6 +462,7 @@ class TaskDeck(QWidget):
             else:
                 self.expand.emit()
         self.settle()
+        self._place_buttons()
         self.update()
 
     def mousePressEvent(self, event):

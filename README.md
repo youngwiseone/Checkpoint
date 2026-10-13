@@ -32,9 +32,9 @@ Next time, just double-click **start.cmd**. Closing the review window leaves Che
 
 In the note window, type or click **Dictate note**, then **Save**. For dictation, first download the speech model in **Settings → Transcript**. It runs offline after download.
 
-To capture what you're saying as you test, choose your microphone and/or computer audio in **Settings → Audio**, then start recording from the tray. With transcription enabled, nearby speech is added to your screenshots automatically. Recording is optional.
+To capture what you're saying as you test, choose your microphone and/or computer audio in **Settings → Audio**, then click the circular record button beside Settings in review, or start recording from the tray. The button turns red while recording; click it again to stop. With transcription enabled, nearby speech is added to your screenshots automatically. Recording is optional.
 
-In review, edit notes or screenshots, drag a task **up to mark Done**, or **down to delete**. Deleted tasks can be reopened.
+In review, the task text stays visible in a frosted caption along the bottom of each screenshot card. Click its pencil button to edit notes or screenshots, drag a task **up to mark Done**, or **down to delete**. Deleted tasks can be reopened.
 
 ## Work through your tasks
 

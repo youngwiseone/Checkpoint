@@ -1,4 +1,4 @@
-"""Night blue by default, the light card look as an option: every native window follows the setting."""
+"""Pearl Glass by default; every native window follows the appearance setting."""
 
 import os
 
@@ -17,13 +17,13 @@ def test_palettes_match():
     assert theme.rgba("#12345678") == (0x12, 0x34, 0x56, 0x78)  # #rrggbbaa, not Qt's #aarrggbb
 
 
-def test_default_theme_is_dark(app_env):
+def test_default_theme_is_pearl_glass(app_env):
     from checkpoint import theme
     from checkpoint.desktop import colors
 
-    assert theme.current() == "dark"
-    assert colors.current().dark
-    assert colors.qcolor("pill").alpha() == theme.rgba(theme.PALETTES["dark"]["pill"])[3]
+    assert theme.current() == "light"
+    assert not colors.current().dark
+    assert colors.qcolor("pill").alpha() == theme.rgba(theme.PALETTES["light"]["pill"])[3]
 
 
 @pytest.mark.parametrize("name", ["dark", "light"])

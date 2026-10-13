@@ -1,11 +1,10 @@
 """A floating screenshot switcher with inline project creation and gesture review."""
-import math
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from sqlalchemy import select
-from PySide6.QtCore import Qt, QTimer, QUrl, QPointF, Signal, QSize
-from PySide6.QtGui import QImage, QImageReader, QPixmap, QPainter, QIcon, QPen, QPolygonF, QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize
+from PySide6.QtGui import QImage, QImageReader, QPixmap, QPainter, QDesktopServices, QGuiApplication
+from PySide6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                               QProgressBar, QPushButton, QVBoxLayout, QMenu)
 
 from ..services.review import get_work_item, list_work_items, update_work_item
@@ -14,30 +13,12 @@ from ..models import Capture, Project, Session, Setting
 from ..storage import media_path
 from . import colors
 from .windows import popup_css
-from .glass import center_on_screen, GlassDialog, get_text
+from .glass import center_on_screen, GlassDialog, get_text, paint_glass
+from .icons import control_icon
 from .cards import TaskDeck
 from .backdrop import capture_backdrop, paint_backdrop
 
 
-def control_icon(kind):
-    image = QPixmap(24, 24)
-    image.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(image)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(colors.current().text, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-    if kind == 'close':
-        painter.drawLine(6, 6, 18, 18)
-        painter.drawLine(18, 6, 6, 18)
-    else:
-        points = []
-        for i in range(32):
-            angle = i * math.pi / 16
-            radius = 10 if i % 4 in (1, 2) else 7.5
-            points.append(QPointF(12 + math.cos(angle) * radius, 12 + math.sin(angle) * radius))
-        painter.drawPolygon(QPolygonF(points))
-        painter.drawEllipse(QPointF(12, 12), 3, 3)
-    painter.end()
-    return QIcon(image)
 
 
 class ProjectPicker(QComboBox):
@@ -75,64 +56,69 @@ class InboxPanel(QFrame):
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle('Checkpoint')
-        self.resize(620, 800)
+        self.resize(1180, 800)
         self.setMinimumSize(560, 500)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 16, 22, 18)
+        layout.setContentsMargins(36, 24, 36, 24)
         layout.setSpacing(10)
 
-        header = QHBoxLayout()
-        header.setSpacing(8)
+        self.toolbar = QGridLayout()
+        self.toolbar.setSpacing(8)
+        self._toolbar_wide = None
         self.project_picker = ProjectPicker()
-        self.project_picker.setMinimumHeight(48)
-        self.project_picker.setStyleSheet('QComboBox { padding: 10px 16px; font-size: 18px; font-weight: 600; } QComboBox::drop-down { width: 40px; }')
+        self.project_picker.setObjectName('toolbarPicker')
+        self.project_picker.setFixedHeight(48)
+        self.project_picker.setMinimumWidth(180)
+        self.project_picker.setMaximumWidth(350)
+        self.project_picker.setStyleSheet('QComboBox { padding: 10px 16px; font-size: 16px; font-weight: 600; border-radius: 24px; }')
         self.project_picker.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.project_picker.setAccessibleName('Choose project. Double-click to rename.')
         self.project_picker.setToolTip('Click to switch projects. Double-click to rename the current project.')
         self.project_picker.currentIndexChanged.connect(self._project_changed)
         self.project_picker.rename_requested.connect(self._rename_project)
-        header.addWidget(self.project_picker, 1)
-        self.new_session_button = QPushButton('New session')
-        self.new_session_button.setAccessibleName('Start a new session for the current project')
-        self.new_session_button.setToolTip('End the current session and start a new one for this project.')
-        self.new_session_button.clicked.connect(self._new_session)
-        header.addWidget(self.new_session_button)
-        self.settings_button = QPushButton()
-        self.close_button = QPushButton()
-        for button, kind, label, callback in ((self.settings_button, 'settings', 'Settings', self._settings),
-                                               (self.close_button, 'close', 'Close', self.hide)):
-            button.setIcon(control_icon(kind))
-            button.setFixedSize(36, 36)
-            button.setStyleSheet('padding: 4px; border-radius: 18px;')
-            button.setAccessibleName(label)
-            button.setToolTip(label)
-            button.clicked.connect(callback)
-            header.addWidget(button)
-        layout.addLayout(header)
-
-        filters = QHBoxLayout()
         self.search = QLineEdit()
+        self.search.setObjectName('taskSearch')
+        self.search.setFixedHeight(48)
+        self.search.setMinimumWidth(140)
         self.search.setPlaceholderText('Search tasks')
         self.search.setAccessibleName('Search tasks')
+        self.search.addAction(control_icon('search'), QLineEdit.ActionPosition.LeadingPosition)
         self.search.textChanged.connect(self.refresh)
-        filters.addWidget(self.search, 1)
         self.status_picker = QComboBox()
         for label, status in (('Open', 'open'), ('Done / archived', 'done'), ('Deleted', 'deleted'), ('All', 'all')):
             self.status_picker.addItem(label, status)
         self.status_picker.setAccessibleName('Task status')
-        self.status_picker.setFixedWidth(155)
-        self.status_picker.currentIndexChanged.connect(self._filter_changed)
-        filters.addWidget(self.status_picker)
         self.session_picker = QComboBox()
         self.session_picker.addItem('All sessions', None)
         self.session_picker.addItem('Without recording', '__unrecorded__')
         self.session_picker.setAccessibleName('Session')
-        self.session_picker.currentIndexChanged.connect(self._filter_changed)
-        self.session_picker.setFixedWidth(155)
-        filters.addWidget(self.session_picker)
+        for picker in (self.status_picker, self.session_picker):
+            picker.setObjectName('toolbarPicker')
+            picker.setFixedSize(156, 48)
+            picker.currentIndexChanged.connect(self._filter_changed)
+        self.settings_button = QPushButton()
+        self.record_button = QPushButton()
+        self.close_button = QPushButton()
+        self.record_button.setCheckable(True)
+        self.record_button.setProperty('recording', False)
+        for button, kind, label, callback in (
+                (self.settings_button, 'settings', 'Settings', self._settings),
+                (self.record_button, 'record', 'Start recording', self._toggle_recording),
+                (self.close_button, 'close', 'Close', self.hide)):
+            button.setObjectName('recordButton' if kind == 'record' else 'glassCircle')
+            button.setIcon(control_icon(kind))
+            button.setIconSize(QSize(24, 24))
+            button.setFixedSize(44, 44)
+            button.setAccessibleName(label)
+            button.setToolTip(label)
+            button.clicked.connect(callback)
+        self.record_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.record_button.customContextMenuRequested.connect(self._record_menu)
+        self._record_visual_state = None
+        layout.addLayout(self.toolbar)
+        self._layout_toolbar()
         self.position = QLabel()
-        self.position.setStyleSheet('color: white; font-size: 12px;')
-        layout.addLayout(filters)
+        self.position.setObjectName('muted')
 
         self.deck = TaskDeck(self)
         self.deck.navigate.connect(self._step)
@@ -143,7 +129,7 @@ class InboxPanel(QFrame):
         self.deck.customContextMenuRequested.connect(self._task_menu)
         layout.addWidget(self.deck, 1)
         self.position.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.position)
+        self.position.hide()
         self.notification = QFrame()
         notice = QHBoxLayout(self.notification)
         notice.setContentsMargins(0, 0, 0, 0)
@@ -161,6 +147,9 @@ class InboxPanel(QFrame):
         footer = QHBoxLayout()
         self.images_button = QPushButton('Open task images')
         self.images_button.setObjectName('primary')
+        self.images_button.setIcon(control_icon('images', colors.current().on_accent))
+        self.images_button.setIconSize(QSize(24, 24))
+        self.images_button.setMinimumHeight(48)
         self.images_button.setAccessibleName('Open unfinished task images to drag into Codex')
         self.images_button.clicked.connect(self._images)
         self.images_button.setMaximumWidth(380)
@@ -171,7 +160,7 @@ class InboxPanel(QFrame):
         self.images_hint = QLabel('Unfinished tasks — drag these images into Codex')
         self.images_hint.setWordWrap(True)
         self.images_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.images_hint.setStyleSheet('font-size: 12px; color: white;')
+        self.images_hint.setObjectName('muted')
         layout.addWidget(self.images_hint)
 
         self.activity_dialog = GlassDialog(self)
@@ -188,6 +177,77 @@ class InboxPanel(QFrame):
         self.processing_progress.setTextVisible(False)
         details.addWidget(self.processing_progress)
         self.timer = QTimer(self, interval=1000, timeout=self.refresh)
+
+    def _layout_toolbar(self):
+        wide = self.width() >= 1000
+        if wide == self._toolbar_wide:
+            return
+        self._toolbar_wide = wide
+        while self.toolbar.count():
+            self.toolbar.takeAt(0)
+        for column in range(7):
+            self.toolbar.setColumnStretch(column, 0)
+        if wide:
+            for column, widget in enumerate((self.project_picker, self.search, self.status_picker,
+                                            self.session_picker, self.settings_button,
+                                            self.record_button, self.close_button)):
+                self.toolbar.addWidget(widget, 0, column)
+            self.toolbar.setColumnStretch(0, 2)
+            self.toolbar.setColumnStretch(1, 4)
+        else:
+            self.toolbar.addWidget(self.project_picker, 0, 0, 1, 3)
+            for column, widget in enumerate((self.settings_button, self.record_button, self.close_button), 3):
+                self.toolbar.addWidget(widget, 0, column)
+            self.toolbar.addWidget(self.search, 1, 0, 1, 2)
+            self.toolbar.addWidget(self.status_picker, 1, 2, 1, 2)
+            self.toolbar.addWidget(self.session_picker, 1, 4, 1, 2)
+            self.toolbar.setColumnStretch(0, 1)
+        margin = 36 if wide else 22
+        self.layout().setContentsMargins(margin, 24, margin, 24)
+
+    def resizeEvent(self, event):
+        if hasattr(self, 'toolbar'):
+            self._layout_toolbar()
+        super().resizeEvent(event)
+
+    def _toggle_recording(self):
+        if not self.project_id or self.project_picker.isEditable():
+            return
+        try:
+            if self.recording:
+                self.recording()
+            elif self.new_session:
+                self._new_session()
+        except (ValueError, OSError) as error:
+            self._notify(str(error))
+        finally:
+            self.refresh()
+
+    def _record_menu(self, point):
+        menu = QMenu(self)
+        menu.addAction('Recording and transcription', self.activity_dialog.exec)
+        if self.new_session and self.project_id:
+            menu.addAction('Start a new session', self._new_session)
+        menu.exec(self.record_button.mapToGlobal(point))
+
+    def _refresh_record_button(self, recording):
+        active, paused = bool(recording.get('active')), bool(recording.get('paused'))
+        self.record_button.setEnabled(bool(self.project_id and (self.recording or self.new_session))
+                                      and not self.project_picker.isEditable())
+        self.record_button.setChecked(active)
+        state = (active, paused, colors.current().name)
+        if state != self._record_visual_state:
+            self._record_visual_state = state
+            self.record_button.setProperty('recording', active and not paused)
+            self.record_button.setIcon(control_icon('record', colors.current().warn if paused else None,
+                                                    active=active and not paused))
+            self.record_button.style().unpolish(self.record_button)
+            self.record_button.style().polish(self.record_button)
+        label = 'Stop recording' if active else 'Start recording'
+        seconds = int(recording.get('offset_ms', 0) / 1000)
+        detail = f" · {'Paused' if paused else 'Recording'} {seconds // 60:02d}:{seconds % 60:02d}" if active else ''
+        self.record_button.setAccessibleName(label)
+        self.record_button.setToolTip(label + detail + '\nRight-click for recording and transcription details.')
 
     def _notify(self, text, undo=False):
         self.message.setText(text)
@@ -243,7 +303,7 @@ class InboxPanel(QFrame):
         self.project_picker.blockSignals(True)
         self.project_picker.clear()
         for pid, name in projects():
-            self.project_picker.addItem(name, pid)
+            self.project_picker.addItem(control_icon('folder'), name, pid)
         self.project_picker.addItem('New project…', '__new__')
         index = self.project_picker.findData(self.project_id)
         self.project_picker.setCurrentIndex(index if index >= 0 else 0)
@@ -433,7 +493,7 @@ class InboxPanel(QFrame):
                                      session_id=self.session_picker.currentData()))) if self.project_id else []
         recording = self.recording_status() if self.recording_status else {}
         self.project_picker.setEnabled(not recording.get('active'))
-        self.new_session_button.setEnabled(bool(self.project_id and self.new_session) and not self.project_picker.isEditable())
+        self._refresh_record_button(recording)
         if recording.get('active'):
             seconds = int(recording.get('offset_ms', 0) / 1000)
             sources = ', '.join(f"{source.get('label', source.get('kind', 'Audio'))}: {source.get('state', 'starting')}" for source in recording.get('sources', []))
@@ -446,7 +506,7 @@ class InboxPanel(QFrame):
         self.images_button.setEnabled(bool(self.project_id))
         self.images_button.setText({'done': 'Open done images', 'deleted': 'Open deleted images'}.get(status, 'Open task images'))
         self.images_hint.setText({'done': 'Finished tasks — stored separately from unfinished tasks',
-                                 'deleted': 'Deleted tasks — kept here so you can recover them'}.get(status, 'Unfinished tasks — drag these images into Codex'))
+                                 'deleted': 'Deleted tasks — kept here so you can recover them'}.get(status, '← / → browse · Drag up to finish, down to delete · Drag task images into chat'))
         ids = [item['id'] for item in self.items]
         if self.selected_id not in ids:
             remembered = self._saved_selection() if self.selected_id is None else None
@@ -513,6 +573,7 @@ class InboxPanel(QFrame):
     def paintEvent(self, event):
         painter = QPainter(self)
         paint_backdrop(painter, self)
+        paint_glass(painter, self.rect().adjusted(10, 1, -10, -1), colors.current(), radius=36, strength=.6)
         painter.end()
 
     def _update_loading_card(self):

@@ -65,7 +65,7 @@ class Colors:
         self.lift = QColor(0, 0, 0, 34) if self.dark else QColor(20, 24, 33, 10)  # one layer of a pill's shadow
         self.chip = alpha(self.surface_3 if self.dark else white, 235)  # the type chip over a screenshot
         self.field = self.bg if self.dark else self.surface_2  # text boxes
-        self.button = self.surface_2 if self.dark else self.surface_3
+        self.button = self.surface_2
         self.on_accent = white
         self.focus = mix(self.accent, white, 0.7)  # focus ring on an accent button
         self.idle = mix(self.accent, self.card, 0.55)  # the "new project" avatar when not picked
@@ -80,7 +80,7 @@ def current() -> Colors:
     try:
         name = theme.current()
     except Exception:  # noqa: BLE001 - settings unreadable: still draw, in the default theme
-        name = "dark"
+        name = "light"
     if name not in _cache:
         _cache[name] = Colors(name)
     return _cache[name]

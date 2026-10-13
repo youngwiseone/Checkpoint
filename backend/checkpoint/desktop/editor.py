@@ -82,7 +82,12 @@ class SelectionImage(QLabel):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(colors.current().border, 1))
+        painter.setBrush(colors.current().field)
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 16, 16)
         if self.source.isNull():
+            painter.setPen(colors.current().muted)
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Screenshot unavailable")
             return
         painter.drawPixmap(self.image_rect(), self.source)
@@ -95,7 +100,7 @@ class ScreenshotDialog(GlassDialog):
     def __init__(self, capture_id, parent=None):
         super().__init__(parent)
         self.capture_id = capture_id
-        self.setWindowTitle("Edit screenshot")
+        self.setWindowTitle("Edit image")
         self.resize(900, 650)
         self.setStyleSheet(popup_css(colors.current()))
         layout = self.content_layout()
@@ -106,10 +111,14 @@ class ScreenshotDialog(GlassDialog):
         self.image = SelectionImage()
         layout.addWidget(self.image, 1)
         self.message = QLabel("Drag to select an area. The original is always preserved.")
+        self.message.setObjectName('muted')
+        self.message.setWordWrap(True)
         layout.addWidget(self.message)
         actions = QHBoxLayout()
         for label, callback in (("Restore original", lambda: self._save(True)), ("Cancel", self.reject), ("Save", self._save)):
             button = QPushButton(label)
+            if label == 'Save':
+                button.setObjectName('primary')
             button.clicked.connect(callback)
             actions.addWidget(button)
         layout.addLayout(actions)
@@ -139,6 +148,7 @@ class TaskDialog(GlassDialog):
         layout = self.content_layout()
         self.captures = [e for e in self.item["evidence"] if e["kind"] == "capture"]
         self.screenshot = QLabel()
+        self.screenshot.setObjectName('imagePreview')
         self.screenshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.screenshot)
         if self.captures:
@@ -176,6 +186,7 @@ class TaskDialog(GlassDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName('primary')
         layout.addWidget(buttons)
 
     def _image(self):
