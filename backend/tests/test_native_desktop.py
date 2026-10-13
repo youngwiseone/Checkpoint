@@ -112,10 +112,10 @@ def test_native_task_save_rejects_conflicting_edit(app_env):
     from checkpoint.services.review import create_work_item, get_work_item, update_work_item
     item = create_work_item(default_project_id(), "bug", "Old title", "")
     dialog = TaskDialog(item["id"])
-    dialog.title.setText("New title")
     dialog.description.setPlainText("Expected behaviour")
     dialog._save()
-    assert get_work_item(item["id"])["title"] == "New title"
+    assert get_work_item(item["id"])["description"] == "Expected behaviour"
+    assert not hasattr(dialog, 'title')
     dialog.close()
     dialog = TaskDialog(item["id"])
     update_work_item(item["id"], {"description": "Changed elsewhere"})

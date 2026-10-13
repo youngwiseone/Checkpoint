@@ -33,6 +33,38 @@ def test_text_only_card():
         assert image.width == 1200
 
 
+def test_note_edits_render_once_without_title_or_history(app_env):
+    from checkpoint.services import image_cards, review
+    from test_simple_inbox import captured
+
+    service, cid, _ = captured(app_env)
+    original = 'Original note that becomes a title'
+    iid = service.save_capture_note(cid, original)['work_item_id']
+    root = image_cards.refresh()
+    target = next(root.rglob(f'{iid}-*.png'))
+    with Image.open(target) as image:
+        assert image.info['Checkpoint.Context'].count(original) == 1
+        screenshot = image.crop((440, 64, 760, 244)).tobytes()
+
+    for note in ('Updated short note', 'A long updated note. ' * 40 + '\nLast line.', ''):
+        review.update_work_item(iid, {'description': note})
+        image_cards.refresh()
+        assert list(root.rglob(f'{iid}-*.png')) == [target]
+        with Image.open(target) as image:
+            context = image.info['Checkpoint.Context']
+            assert original not in context
+            assert context == 'Project: General | Status: open' + ('\n\n' + note if note else '')
+            assert json.loads(image.info['Checkpoint.Item'])['item']['description'] == note
+            assert image.crop((440, 64, 760, 244)).tobytes() == screenshot
+
+
+def test_distinct_title_is_not_rendered():
+    item = {'title': 'An obsolete title', 'description': 'The current note', 'excerpts': []}
+    with Image.open(io.BytesIO(render_cards(item)[0])) as image:
+        assert 'An obsolete title' not in image.info['Checkpoint.Context']
+        assert image.info['Checkpoint.Context'].count('The current note') == 1
+
+
 def test_live_refresh_updates_and_removes_deleted(app_env):
     from checkpoint.db import write_session
     from checkpoint.models import Project, WorkItem

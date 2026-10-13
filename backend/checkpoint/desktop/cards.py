@@ -179,7 +179,7 @@ class TaskDeck(QWidget):
         self.oldest_button.setEnabled(ordinal > 1)
         self.newest_button.setEnabled(bool(ordinal and ordinal < count))
         self._place_buttons()
-        self.setAccessibleDescription(f"{item['title']}. {item.get('description', '')}" if item else 'No matching captures.')
+        self.setAccessibleDescription(self._caption_text(item) if item else 'No matching captures.')
         if changed:
             self.animation.stop()
             self.offset = 0.0
@@ -200,11 +200,7 @@ class TaskDeck(QWidget):
 
     @staticmethod
     def _caption_text(item):
-        title = item.get('title', '')
-        context = visible_context(item)
-        if context.startswith(title) and title:
-            return context
-        return '\n\n'.join(part for part in (title, context) if part)
+        return visible_context(item)
 
     def _caption_layout(self, rect, item, expanded=False):
         font = QFont('Segoe UI', 14, QFont.Weight.DemiBold)

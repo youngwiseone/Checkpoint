@@ -11,7 +11,7 @@ import ScreenshotEditor from "../components/ScreenshotEditor";
 function ItemDrawer({ id, onClose, previous, next }: { id: string; onClose: () => void; previous?: () => void; next?: () => void }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["item", id], queryFn: () => api.get<WorkItem>(`/api/items/${id}`), refetchInterval: 5000 });
-  type F = { type: ItemType; title: string; description: string; work_status: WorkStatus; assignee: string; priority: string; tags: string };
+  type F = { type: ItemType; description: string; work_status: WorkStatus; assignee: string; priority: string; tags: string };
   const [form, setForm] = useState<F | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
@@ -19,11 +19,10 @@ function ItemDrawer({ id, onClose, previous, next }: { id: string; onClose: () =
   useEffect(() => {
     const d = q.data;
     if (d && (!form || saver.state === "idle" || saver.state === "saved"))
-      setForm({ type: d.type, title: d.title, description: d.description, work_status: d.work_status, assignee: d.assignee ?? "", priority: d.priority ?? "", tags: (d.tags ?? []).join(", ") });
+      setForm({ type: d.type, description: d.description, work_status: d.work_status, assignee: d.assignee ?? "", priority: d.priority ?? "", tags: (d.tags ?? []).join(", ") });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q.data?.version, q.data?.id]);
   const saver = useAutosave(async (v: F) => {
-    if (!v.title.trim()) throw new Error("Title can't be empty");
     await api.patch(`/api/items/${id}`, { ...v, assignee: v.assignee || null, priority: v.priority || null, tags: v.tags.split(",").map((t) => t.trim()).filter(Boolean) });
     qc.invalidateQueries({ queryKey: ["items"] });
     qc.invalidateQueries({ queryKey: ["item", id] });
@@ -73,8 +72,7 @@ function ItemDrawer({ id, onClose, previous, next }: { id: string; onClose: () =
               <span className="spacer" />
             </div>
             {d.sync_error && d.sharing_state !== "synced" && <p className="small" style={{ color: d.sharing_state === "failed" ? "var(--danger)" : "var(--text-2)" }}>{d.sync_error}</p>}
-            <div className="field"><label htmlFor="it">Title</label><input id="it" className="input title-input" value={form.title} onChange={(e) => change({ title: e.target.value })} /></div>
-            <div className="field"><label htmlFor="id">Description</label><textarea id="id" className="textarea" rows={5} value={form.description} onChange={(e) => change({ description: e.target.value })} /></div>
+            <div className="field"><label htmlFor="id">Note</label><textarea id="id" className="textarea" rows={5} value={form.description} onChange={(e) => change({ description: e.target.value })} /></div>
             <details>
               <summary className="label" style={{ cursor: "pointer" }}>More fields</summary>
               <div className="grid-2" style={{ marginTop: 10 }}>
@@ -101,17 +99,15 @@ function ItemDrawer({ id, onClose, previous, next }: { id: string; onClose: () =
 
 function NewItemModal({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const [type, setType] = useState<ItemType>("task");
-  const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
   const qc = useQueryClient();
   const toast = useToast();
-  const create = useMutation({ mutationFn: () => api.post("/api/items", { project_id: projectId, type, title, description: desc }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["items"] }); onClose(); }, onError: (e: Error) => toast("error", e.message) });
+  const create = useMutation({ mutationFn: () => api.post("/api/items", { project_id: projectId, type, title: desc.trim().split(/\r?\n/)[0].slice(0, 300), description: desc }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["items"] }); onClose(); }, onError: (e: Error) => toast("error", e.message) });
   return (
-    <Modal title="New item" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!title.trim()} onClick={() => create.mutate()}>Add item</button></>}>
+    <Modal title="New note" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!desc.trim() || create.isPending} onClick={() => create.mutate()}>Add note</button></>}>
       <div className="stack">
         <div className="field"><label htmlFor="nit">Type</label><select id="nit" className="select" value={type} onChange={(e) => setType(e.target.value as ItemType)} style={{ maxWidth: 220 }}>{TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select></div>
-        <div className="field"><label htmlFor="nitt">Title</label><input id="nitt" className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
-        <div className="field"><label htmlFor="nitd">Description</label><textarea id="nitd" className="textarea" value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
+        <div className="field"><label htmlFor="nitd">Note</label><textarea id="nitd" className="textarea" value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
       </div>
     </Modal>
   );
@@ -159,7 +155,7 @@ export default function Items() {
       <div className="stack">{items.data.map((i) => <div className="card row" key={i.id}>
         {i.thumb_url ? <img src={i.thumb_url} className="thumb" alt="Screenshot" style={{ width: 120, height: 76 }} onClick={() => setOpen(i.id)} /> : <ImageIcon size={20} className="muted" />}
         <button className="btn ghost grow" style={{ textAlign: "left", justifyContent: "flex-start", whiteSpace: "normal" }} onClick={() => setOpen(i.id)}>
-          <span><b>{i.title}</b><span className="small muted" style={{ display: "block" }}>{fmtDate(i.created_at)}{i.capture_count > 1 ? ` · ${i.capture_count} screenshots` : ""}</span></span></button>
+          <span><b>{i.description || "No note yet"}</b><span className="small muted" style={{ display: "block" }}>{fmtDate(i.created_at)}{i.capture_count > 1 ? ` · ${i.capture_count} screenshots` : ""}</span></span></button>
         <button className="btn sm" disabled={status.isPending || undo.isPending} onClick={() => status.mutate({ id: i.id, previousStatus: i.work_status, version: i.version, value: i.work_status === "done" || i.work_status === "wont_do" ? "open" : "done" })}>{i.work_status === "done" || i.work_status === "wont_do" ? "Reopen" : "Done"}</button>
         {i.work_status !== "wont_do" && <button className="btn sm ghost" disabled={status.isPending || undo.isPending} onClick={() => status.mutate({ id: i.id, previousStatus: i.work_status, value: "wont_do", version: i.version })}>Archive</button>}
       </div>)}</div>}

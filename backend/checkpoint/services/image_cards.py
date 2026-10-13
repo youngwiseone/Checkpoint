@@ -64,7 +64,7 @@ def _font(size: int):
 
 def context_text(item: dict) -> str:
     from .review import visible_context
-    parts = [item['title'], f"Project: {item.get('project_name', '')} | Status: {item.get('work_status', '')}"]
+    parts = [f"Project: {item.get('project_name', '')} | Status: {item.get('work_status', '')}"]
     body = visible_context(item)
     if body:
         parts.extend(['', body])
@@ -165,7 +165,7 @@ def _sources(item: dict, include_screenshots: bool):
 def _write_item(item: dict, folder: Path, include_screenshots: bool = True) -> str:
     item = _export_item(item)
     sources = _sources(item, include_screenshots)
-    signature = hashlib.sha256(('composite-v2' + json.dumps(item, sort_keys=True, ensure_ascii=False) + str([(str(p), sha) for p, _, sha in sources])).encode()).hexdigest()
+    signature = hashlib.sha256(('composite-v3' + json.dumps(item, sort_keys=True, ensure_ascii=False) + str([(str(p), sha) for p, _, sha in sources])).encode()).hexdigest()
     key = str(folder / item['id'])
     cached = _cache.get(key)
     if cached and cached[0] == signature and all(path.is_file() for path in cached[1]):

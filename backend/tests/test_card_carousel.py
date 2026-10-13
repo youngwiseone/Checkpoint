@@ -15,6 +15,9 @@ def deck():
     item = {'id': 'center', 'title': 'Center capture', 'description': 'A note with useful context. ' * 30, 'evidence': []}
     neighbors = [(relative, {**item, 'id': str(relative)}, image) for relative in (-2, -1, 1, 2)]
     widget.present(item, image, 5, behind=neighbors)
+    assert widget._caption_text(item) == item['description']
+    assert widget.accessibleDescription() == item['description']
+    assert widget._caption_text({**item, 'description': '', 'description_edited': True}) == ''
     widget.show()
     app.processEvents()
     return app, widget

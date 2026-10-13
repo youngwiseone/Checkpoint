@@ -2,7 +2,7 @@
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QComboBox, QDialogButtonBox, QHBoxLayout, QLabel,
-                              QLineEdit, QPlainTextEdit, QPushButton)
+                              QPlainTextEdit, QPushButton)
 
 from ..db import read_session
 from ..models import Capture
@@ -184,14 +184,9 @@ class TaskDialog(GlassDialog):
             button.clicked.connect(callback)
             extras.addWidget(button)
         layout.addLayout(extras)
-        self.title = QLineEdit(self.item["title"])
-        self.title.setMaxLength(300)
-        self.title.setAccessibleName("Title")
-        layout.addWidget(QLabel("Title"))
-        layout.addWidget(self.title)
         self.description = QPlainTextEdit(self.item["description"])
-        self.description.setAccessibleName("Description")
-        layout.addWidget(QLabel("Description"))
+        self.description.setAccessibleName("Note")
+        layout.addWidget(QLabel("Note"))
         layout.addWidget(self.description, 1)
         quotes = [f"{'Typed note' if e['kind'] == 'note' else e.get('source_label', 'Transcript')}{' (withdrawn)' if e.get('role') == 'withdrawal' else ''}: {e['text']}"
                   for e in self.item["evidence"] if e["kind"] != "capture"]
@@ -251,7 +246,7 @@ class TaskDialog(GlassDialog):
 
     def _commit(self):
         try:
-            self.item = update_work_item(self.item_id, {'title': self.title.text(), 'description': self.description.toPlainText()}, self.item['version'])
+            self.item = update_work_item(self.item_id, {'description': self.description.toPlainText()}, self.item['version'])
             return True
         except ValueError as error:
             self.message.setText(str(error))
@@ -264,7 +259,6 @@ class TaskDialog(GlassDialog):
         try:
             self.item_id = bundle_previous(self.item_id)
             self.item = get_work_item(self.item_id)
-            self.title.setText(self.item['title'])
             self.description.setPlainText(self.item['description'])
             self._refresh_evidence()
         except ValueError as error:
@@ -286,8 +280,5 @@ class TaskDialog(GlassDialog):
             self.accept()
 
     def _save(self):
-        try:
-            update_work_item(self.item_id, {"title": self.title.text(), "description": self.description.toPlainText()}, self.item["version"])
+        if self._commit():
             self.accept()
-        except ValueError as error:
-            self.message.setText(str(error))
