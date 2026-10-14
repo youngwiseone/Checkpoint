@@ -854,6 +854,7 @@ class InboxPanel(QFrame):
             destination = {'done': 'Done', 'deleted': 'Deleted', 'wont_do': 'Archived', 'open': 'Open'}[value]
             message = f'Moved to {destination}.' if len(before) == 1 else f'{len(before)} cards moved to {destination}.'
             self._notify(message, undo=True)
+            self.deck.animate_decision(value, {item['id'] for item in before})
             self.refresh()
         except ValueError as error:
             self._notify(str(error))
@@ -864,6 +865,7 @@ class InboxPanel(QFrame):
         action = self.undo_action
         try:
             update_work_items(action['changes'])
+            self.deck.effects.clear()
             self.undo_action = None
             self.selected_id = action['focus']
             self.selection = set(action['selection'])

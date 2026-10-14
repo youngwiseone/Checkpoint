@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QWidget, QPushButton
 from . import colors
 from .backdrop import frosted_image
 from .glass import paint_glass
-from .icons import control_icon
+from .icons import control_icon, paint_decision_icon
+from .card_effects import CardEffects, CardSnapshot
 from ..services.review import visible_context
 
 
@@ -88,6 +89,7 @@ class TaskDeck(QWidget):
         self.setAccessibleName('Capture carousel. Shift-click to select a range, Ctrl-click to toggle cards. Drag up to mark the selection done, down to delete, sideways to browse, or use the pencil to edit.')
         self.animation = self._animation(self._animate)
         self.horizontal_animation = self._animation(self._animate_horizontal)
+        self.effects = CardEffects(self)
         self.setMinimumHeight(280)
 
     def set_processing(self, message=''):
@@ -139,6 +141,7 @@ class TaskDeck(QWidget):
 
     def hideEvent(self, event):
         self.spinner.stop()
+        self.effects.clear()
         super().hideEvent(event)
 
     def _animation(self, callback):
@@ -189,7 +192,8 @@ class TaskDeck(QWidget):
         self.oldest_button.setEnabled(ordinal > 1)
         self.newest_button.setEnabled(bool(ordinal and ordinal < count))
         self._place_buttons()
-        self.setAccessibleDescription(self._caption_text(item) if item else 'No matching captures.')
+        description = self._caption_text(item) if item else 'No matching captures.'
+        self.setAccessibleDescription(('Completed. ' if item and item.get('work_status') == 'done' else '') + description)
         if changed:
             self.animation.stop()
             self.offset = 0.0
@@ -296,8 +300,33 @@ class TaskDeck(QWidget):
                 path.addRoundedRect(rect, 24, 24)
         return path
 
+    def animate_decision(self, status, item_ids):
+        """Capture visible changed cards before the refreshed deck replaces them."""
+        if status not in ('done', 'deleted'):
+            self.effects.clear()
+            return
+        snapshots = []
+        entries = [(rect, item, image, True) for rect, _, item, image in self.back_cards()]
+        if self.item:
+            entries.append((self.card_rect(), self.item, self.image, False))
+        for rect, item, image, back in entries:
+            if item['id'] not in item_ids or not rect.intersects(QRectF(self.rect())):
+                continue
+            snapshot = QPixmap(rect.size().toSize())
+            snapshot.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(snapshot)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.translate(-rect.topLeft())
+            painter.setClipRect(rect)
+            self._paint_card(painter, rect, item, image, colors.current(), back=back)
+            painter.end()
+            expanded = not back and self.pointer is not None and rect.contains(self.pointer)
+            caption = self._caption_layout(rect, item, expanded)[0].translated(-rect.topLeft())
+            snapshots.append(CardSnapshot(item['id'], QRectF(rect), snapshot, caption))
+        self.effects.start(status, snapshots)
+
     def paintEvent(self, event):
-        if not self.item and not self.processing_message:
+        if not self.item and not self.processing_message and not self.effects.cards:
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -305,6 +334,7 @@ class TaskDeck(QWidget):
         if self.processing_message:
             self._paint_loading(painter)
         if not self.item:
+            self.effects.paint(painter)
             painter.end()
             return
         # Draw the farthest cards first. Occlude their labels under the center label.
@@ -323,17 +353,22 @@ class TaskDeck(QWidget):
             painter.restore()
         self._paint_card(painter, rect, self.item, self.image, c)
         if self.axis == 'vertical' and abs(self.offset) > 16:
-            decision = 'DONE' if self.offset < 0 else 'DELETED'
-            if len(self._dragging_ids) > 1:
-                decision += f' · {len(self._dragging_ids)}'
+            decision = 'done' if self.offset < 0 else 'deleted'
             tint = c.success if self.offset < 0 else c.danger
             anchor = rect if (self.item or {}).get('id') in self._dragging_ids else self._neighbor_rect(self.pressed_card)
-            badge = QRectF(anchor.center().x() - 68, anchor.top() + 14, 136, 38)
+            width = 92 if len(self._dragging_ids) > 1 else 60
+            badge = QRectF(anchor.center().x() - width / 2, anchor.top() + 14, width, 60)
             painter.setPen(QPen(tint, 2))
             painter.setBrush(colors.alpha(c.card, 240))
             painter.drawRoundedRect(badge, 12, 12)
-            painter.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
-            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, decision)
+            painter.setOpacity(min(1., abs(self.offset) / self.swipe_threshold))
+            paint_decision_icon(painter, QRectF(badge.left() + 6, badge.top() + 6, 48, 48), decision)
+            if len(self._dragging_ids) > 1:
+                painter.setPen(tint)
+                painter.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
+                painter.drawText(badge.adjusted(54, 0, -6, 0), Qt.AlignmentFlag.AlignCenter, str(len(self._dragging_ids)))
+            painter.setOpacity(1)
+        self.effects.paint(painter)
         painter.end()
 
     def _place_buttons(self):
@@ -356,6 +391,7 @@ class TaskDeck(QWidget):
         self.play_button.raise_()
 
     def resizeEvent(self, event):
+        self.effects.clear()
         self._place_buttons()
         super().resizeEvent(event)
 
@@ -433,6 +469,16 @@ class TaskDeck(QWidget):
             painter.setPen(QPen(c.on_accent, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawLine(badge.topLeft() + QPointF(6, 13), badge.topLeft() + QPointF(11, 18))
             painter.drawLine(badge.topLeft() + QPointF(11, 18), badge.topLeft() + QPointF(20, 8))
+        visible = rect.intersected(QRectF(self.rect()))
+        if item.get('work_status') == 'done' and visible.width() >= 48:
+            # Keep completion separate from the existing blue selection marker.
+            top = rect.top() + (44 if self.selection_explicit and item['id'] in self.selected_ids else 10)
+            left = visible.right() - 48 if back and rect.center().x() > self.card_rect().center().x() else visible.left() + 10
+            badge = QRectF(left, top, 38, 38)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(colors.alpha(c.card, 230))
+            painter.drawEllipse(badge)
+            paint_decision_icon(painter, badge.adjusted(3, 3, -3, -3), 'done')
         painter.restore()
 
     def enterEvent(self, event):

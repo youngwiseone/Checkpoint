@@ -3,13 +3,54 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QLabel
 
 from . import colors
 
 
 LOGO_PATH = Path(__file__).resolve().parents[3] / 'icon' / 'checkpoint_logo.svg'
+
+
+def paint_decision_icon(painter, rect, kind):
+    """Shared completion seal and layered flame, painted at any display scale."""
+    painter.save()
+    painter.translate(rect.topLeft())
+    painter.scale(rect.width() / 48, rect.height() / 48)
+    painter.setPen(Qt.PenStyle.NoPen)
+    if kind == 'done':
+        gradient = QLinearGradient(8, 4, 36, 44)
+        gradient.setColorAt(0, QColor('#64de75'))
+        gradient.setColorAt(1, QColor('#16964e'))
+        painter.setBrush(gradient)
+        painter.drawEllipse(QRectF(3, 3, 42, 42))
+        painter.setPen(QPen(QColor('white'), 3.8, Qt.PenStyle.SolidLine,
+                            Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawPolyline(QPolygonF([QPointF(14, 24), QPointF(21, 31), QPointF(34, 17)]))
+    else:
+        flame = QPainterPath(QPointF(25, 2))
+        flame.cubicTo(40, 12, 29, 20, 37, 23)
+        flame.cubicTo(38, 19, 40, 17, 40, 15)
+        flame.cubicTo(53, 37, 37, 46, 25, 46)
+        flame.cubicTo(5, 46, 4, 31, 12, 21)
+        flame.cubicTo(10, 32, 19, 33, 18, 24)
+        flame.cubicTo(17, 14, 29, 12, 25, 2)
+        gradient = QLinearGradient(24, 4, 24, 46)
+        gradient.setColorAt(0, QColor('#ffb2a0'))
+        gradient.setColorAt(.4, QColor('#ff514b'))
+        gradient.setColorAt(1, QColor('#df2840'))
+        painter.setBrush(gradient)
+        painter.drawPath(flame)
+        core = QPainterPath(QPointF(25, 20))
+        core.cubicTo(24, 30, 38, 34, 32, 42)
+        core.cubicTo(20, 52, 11, 38, 19, 31)
+        core.cubicTo(19, 36, 24, 36, 25, 20)
+        gradient = QLinearGradient(24, 20, 24, 46)
+        gradient.setColorAt(0, QColor('#ffe5a2'))
+        gradient.setColorAt(1, QColor('#ff8b24'))
+        painter.setBrush(gradient)
+        painter.drawPath(core)
+    painter.restore()
 
 
 def app_icon(status=None, ring=None):
