@@ -139,8 +139,8 @@ def test_card_caption_is_readable_without_hover_and_pencil_edits(app_env, backgr
     widget.resize(800, 660)
     source = QPixmap(320, 540)
     source.fill(QColor(background))
-    widget.present({'id': 'card', 'title': 'Change Suggested Delivery Vehicle to Type',
-                    'description': '', 'evidence': []}, source, 1, ordinal=1)
+    widget.present({'id': 'card', 'title': 'Older task title',
+                    'description': 'Change Suggested Delivery Vehicle to Type', 'evidence': []}, source, 1, ordinal=1)
     widget.show()
     app.processEvents()
     widget.pointer = None
@@ -162,3 +162,84 @@ def test_card_caption_is_readable_without_hover_and_pencil_edits(app_env, backgr
     QTest.mouseClick(widget.edit_button, Qt.MouseButton.LeftButton)
     assert edits == [True] and decisions == []
     widget.close()
+
+
+@pytest.mark.parametrize('size', [(780, 820), (640, 720)])
+def test_task_editor_keeps_note_readable_and_actions_on_one_row(app_env, size):
+    app = application()
+    from PySide6.QtWidgets import QPushButton
+    from checkpoint.desktop.editor import TaskDialog
+    from test_simple_inbox import captured
+    service, cid, _ = captured(app_env)
+    note = '\n'.join(f'Line {index}: describe the change clearly.' for index in range(1, 13))
+    iid = service.save_capture_note(cid, note)['work_item_id']
+    dialog = TaskDialog(iid)
+    dialog.resize(*size)
+    dialog.show()
+    app.processEvents()
+    try:
+        assert dialog.description.height() >= 240
+        assert dialog.description.height() > dialog.screenshot.height()
+        assert dialog.description.toPlainText() == note
+        assert dialog.rect().contains(dialog.description.geometry())
+        assert not dialog.words.isVisible()
+        controls = [button for button in dialog.findChildren(QPushButton)
+                    if button.text() in ('Add to last task', 'Snip image', 'Open menu', 'Captured words')]
+        assert len(controls) == 4
+        assert len({button.geometry().center().y() for button in controls}) == 1
+        assert all(dialog.rect().contains(button.geometry()) for button in controls)
+        assert dialog.screenshot.rect().contains(dialog.edit_image_btn.geometry())
+        assert dialog.screenshot.rect().contains(dialog.remove_image_btn.geometry())
+        assert dialog.edit_image_btn.x() < dialog.remove_image_btn.x()
+        assert not dialog.previous_image_btn.isVisible()
+        assert not dialog.next_image_btn.isVisible()
+        dialog.words_button.click()
+        app.processEvents()
+        assert dialog.words.isVisible() and note in dialog.words.toPlainText()
+        assert dialog.description.height() >= 240
+        assert dialog.size().height() <= size[1]
+    finally:
+        dialog.close()
+
+
+def test_task_editor_image_arrows_edit_and_remove_the_displayed_image(app_env, monkeypatch):
+    app = application()
+    from checkpoint.desktop import editor
+    from checkpoint.services.inbox import ensure_capture
+    from checkpoint.services.review import get_work_item
+    from checkpoint.services.task_evidence import bundle_previous
+    from test_simple_inbox import captured
+    service, first, _ = captured(app_env)
+    iid = service.save_capture_note(first, 'First note')['work_item_id']
+    _, second, _ = captured(app_env)
+    bundle_previous(ensure_capture(second))
+    dialog = editor.TaskDialog(iid)
+    dialog.show()
+    app.processEvents()
+    try:
+        assert not dialog.previous_image_btn.isEnabled()
+        dialog.next_image_btn.click()
+        selected = dialog._current_capture_id()
+        assert selected != dialog.captures[0]['capture_id']
+        assert not dialog.next_image_btn.isEnabled()
+        assert dialog.screenshot.counter.text() == '2 / 2'
+        for button in (dialog.previous_image_btn, dialog.next_image_btn, dialog.edit_image_btn, dialog.remove_image_btn):
+            assert dialog.screenshot.rect().contains(button.geometry())
+        screenshot_editor = Mock()
+        monkeypatch.setattr(editor, 'ScreenshotDialog', screenshot_editor)
+        dialog.description.setPlainText('Updated note stays intact')
+        dialog.edit_image_btn.click()
+        screenshot_editor.assert_called_once_with(selected, dialog)
+        assert dialog._current_capture_id() == selected
+        dialog.remove_image_btn.click()
+        assert len(dialog.captures) == 1
+        assert dialog._current_capture_id() != selected
+        assert not dialog.previous_image_btn.isVisible()
+        assert not dialog.next_image_btn.isVisible()
+        assert get_work_item(iid)['description'] == 'Updated note stays intact'
+        dialog.remove_image_btn.click()
+        assert not dialog.screenshot.isVisible()
+        assert not dialog.edit_image_btn.isEnabled()
+        assert dialog.description.toPlainText() == 'Updated note stays intact'
+    finally:
+        dialog.close()

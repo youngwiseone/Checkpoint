@@ -85,6 +85,12 @@ def control_icon(kind, color=None, active=False):
         painter.drawPolygon(QPolygonF([QPointF(4, 20), QPointF(5, 16), QPointF(8, 19)]))
         painter.setPen(QPen(c.surface_2, 1.5))
         painter.drawLine(13, 7, 17, 11)
+    elif kind == 'trash':
+        painter.drawLine(4, 6, 20, 6)
+        painter.drawPolyline(QPolygonF([QPointF(9, 6), QPointF(9, 3), QPointF(15, 3), QPointF(15, 6)]))
+        painter.drawPolyline(QPolygonF([QPointF(6, 6), QPointF(7, 21), QPointF(17, 21), QPointF(18, 6)]))
+        painter.drawLine(10, 10, 10, 17)
+        painter.drawLine(14, 10, 14, 17)
     elif kind == 'copy':
         painter.drawRoundedRect(QRectF(3, 3, 13, 13), 2, 2)
         painter.setBrush(c.surface_2)
