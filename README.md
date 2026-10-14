@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="icon/checkpoint_logo.svg" alt="Checkpoint logo" width="128" />
-</p>
-
 # Checkpoint
 
 ![Checkpoint — Your next fix starts with F9. Screenshot + note, ready for your AI.](output/marketing/checkpoint-f9-x-2026-10-14.png)
