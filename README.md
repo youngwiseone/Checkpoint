@@ -4,6 +4,8 @@
 
 # Checkpoint
 
+![Checkpoint — Your next fix starts with F9. Screenshot + note, ready for your AI.](output/marketing/checkpoint-f9-x-2026-10-14.png)
+
 Capture issues. Turn them into to-dos. Work through them with your assistant.
 
 Checkpoint is a Windows app for recording bugs, design changes and feature ideas in games, apps or anything else on your screen. Save a screenshot with a typed or dictated note, then send it to Codex or Claude to work through.
