@@ -6,8 +6,13 @@ import App from "./App";
 import { ToastProvider } from "./components/ui";
 import "./styles.css";
 import { applyCachedTheme } from "./theme";
+import checkpointLogo from "../../icon/checkpoint_logo.svg";
 
 applyCachedTheme();
+
+// Use the versioned sidebar asset for the browser icon as well.
+const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+if (favicon) favicon.href = checkpointLogo;
 
 const client = new QueryClient({
   defaultOptions: {

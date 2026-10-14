@@ -13,6 +13,7 @@ import Items from "./pages/Items";
 import SettingsPage from "./pages/Settings";
 import type { Project } from "./types";
 import { useThemeSync } from "./theme";
+import checkpointLogo from "../../icon/checkpoint_logo.svg";
 
 function SignedOut() {
   return (
@@ -77,7 +78,7 @@ export default function App() {
   return (
     <div className="app">
       <nav className="sidebar" aria-label="Main">
-        <div className="brand"><img className="brand-mark" src="/checkpoint_logo.svg" alt="" /><span>Checkpoint</span></div>
+        <div className="brand"><img className="brand-mark" src={checkpointLogo} alt="" /><span>Checkpoint</span></div>
         {state?.first_run_complete && <ProjectSwitcher />}
         <NavLink to="/" end className="nav-link">
           <Radio size={18} /><span className="label">Session</span>
