@@ -45,7 +45,7 @@ def test_inline_project_reuses_settings_and_case_insensitive_name(app_env):
     panel.close()
 
 
-def test_session_filter_preserves_selection_and_unrecorded_tasks(app_env):
+def test_date_filter_includes_recorded_and_unrecorded_tasks_and_preserves_selection(app_env):
     app = application()
     from checkpoint.desktop.inbox import InboxPanel
     from checkpoint.services.capture import default_project_id
@@ -65,12 +65,13 @@ def test_session_filter_preserves_selection_and_unrecorded_tasks(app_env):
         iid = task.id
     panel = InboxPanel()
     panel.toggle(pid)
-    panel.session_picker.setCurrentIndex(panel.session_picker.findData(sid))
-    assert [item['id'] for item in panel.items] == [iid]
+    assert panel.date_picker.currentData() == 'all'
+    assert {item['id'] for item in panel.items} == {iid, unsessioned['id']}
+    focused = panel.selected_id
     panel.refresh()
-    assert panel.selected_id == iid and panel.session_picker.currentData() == sid
-    panel.session_picker.setCurrentIndex(panel.session_picker.findData('__unrecorded__'))
-    assert [item['id'] for item in panel.items] == [unsessioned['id']]
+    assert panel.selected_id == focused and panel.date_picker.currentData() == 'all'
+    panel.date_picker.setCurrentIndex(panel.date_picker.findData('yesterday'))
+    assert not panel.items
     panel.close()
 
 
@@ -139,16 +140,16 @@ def test_loading_card_tracks_project_work_and_cannot_be_swiped(app_env):
     panel.deck.begin_drag(center)
     panel.deck.end_drag(center - QPointF(0, 140))
     assert not decided
-    assert panel.status_picker.width() == panel.session_picker.width()
-    assert panel.status_picker.y() == panel.session_picker.y()
-    assert abs(panel.session_picker.geometry().center().y() - panel.search.geometry().center().y()) <= 1
+    assert panel.status_picker.width() == panel.date_picker.width()
+    assert panel.status_picker.y() == panel.date_picker.y()
+    assert abs(panel.date_picker.geometry().center().y() - panel.search.geometry().center().y()) <= 1
     assert panel.record_button.isVisible() and not hasattr(panel, 'activity_button')
     assert not hasattr(panel, 'new_session_button')
     available = app.primaryScreen().availableGeometry().adjusted(12, 12, -12, -12)
     assert panel.geometry() == available
-    panel.session_picker.setCurrentIndex(panel.session_picker.findData('__unrecorded__'))
+    panel.date_picker.setCurrentIndex(panel.date_picker.findData('yesterday'))
     assert not panel.deck.processing_message and not panel.deck.spinner.isActive()
-    panel.session_picker.setCurrentIndex(0)
+    panel.date_picker.setCurrentIndex(0)
     panel.project_picker.setCurrentIndex(panel.project_picker.findData(other_id))
     assert not panel.deck.processing_message
     panel.project_picker.setCurrentIndex(panel.project_picker.findData(pid))
@@ -169,7 +170,7 @@ def test_chronological_carousel_numbers_and_restart_position(app_env):
     from checkpoint.desktop.inbox import InboxPanel
     pid = default_project_id()
     with write_session() as db:
-        base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        base = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         tasks = [WorkItem(project_id=pid, type='note', title=f'Card {i + 1}', description='',
                           human_updated_at=base + timedelta(seconds=i)) for i in range(54)]
         db.add_all(tasks)

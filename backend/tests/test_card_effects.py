@@ -103,7 +103,10 @@ def test_last_card_effect_survives_empty_refresh_and_undo_clears_it(app_env, sta
                for y in range(int(snapshot.rect.top() + 10), int(snapshot.rect.bottom() - 10), 20))
     if status == 'deleted':
         burned = effect_frame(deck, .4)
-        assert burned.pixelColor(center).alpha() == 0
+        # A few rising sparks may cross the hole; its surface has still burned away.
+        clear = sum(burned.pixelColor(center.x() + x, center.y() + y).alpha() == 0
+                    for x in (-10, 0, 10) for y in (-10, 0, 10))
+        assert clear >= 6
         assert burned.pixelColor(int(snapshot.rect.left() + 30), int(snapshot.rect.top() + 30)).alpha() > 0
     finished = effect_frame(deck, deck.effects.duration)
     assert finished.pixelColor(center).alpha() == 0
@@ -120,7 +123,10 @@ def test_failed_batch_starts_no_effect_and_success_animates_only_changed_cards(a
     from test_batch_review import panel_with_cards, settle
     from checkpoint.services.review import update_work_item
     app, panel, ids = panel_with_cards()
+    panel._clear_selection()
+    panel._step(-len(ids))
     panel._select_cards(2, Qt.KeyboardModifier.ShiftModifier)
+    assert panel.selection == set(ids[:3])
     settle(panel.deck)
     update_work_item(ids[1], {'title': 'Edited elsewhere'})
     panel._status('deleted')

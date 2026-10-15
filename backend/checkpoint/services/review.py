@@ -434,7 +434,8 @@ def review_counts(project_id: Optional[str] = None) -> dict:
 
 # ---------------------------------------------------------------- work items
 def list_work_items(project_id: Optional[str] = None, q: str = "", types: list[str] | None = None,
-                    statuses: list[str] | None = None, session_id: Optional[str] = None) -> list[dict]:
+                    statuses: list[str] | None = None, session_id: Optional[str] = None,
+                    modified_since: Optional[datetime] = None, modified_before: Optional[datetime] = None) -> list[dict]:
     with read_session() as s:
         stmt = select(WorkItem).where(WorkItem.duplicate_of_id.is_(None))
         if project_id:
@@ -449,6 +450,10 @@ def list_work_items(project_id: Optional[str] = None, q: str = "", types: list[s
             stmt = stmt.where(WorkItem.session_id.is_(None))
         elif session_id:
             stmt = stmt.where(WorkItem.session_id == session_id)
+        if modified_since is not None:
+            stmt = stmt.where(WorkItem.human_updated_at >= modified_since)
+        if modified_before is not None:
+            stmt = stmt.where(WorkItem.human_updated_at < modified_before)
         if q:
             like = f"%{q.strip()}%"
             stmt = stmt.where(or_(WorkItem.title.ilike(like), WorkItem.description.ilike(like)))

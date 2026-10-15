@@ -64,7 +64,7 @@ def test_hold_menu_starts_and_replaces_session_for_selected_project(app_env):
         assert manager.active.project_id == panel.project_id
         with read_session() as session:
             assert session.get(Session, first).state == 'ended'
-        assert panel.session_picker.findData(manager.active.id) >= 0
+        assert panel.date_picker.currentData() == 'all'
         assert 'New session started' in panel.message.text()
     finally:
         manager.shutdown()

@@ -6,17 +6,18 @@ from sqlalchemy import select
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal, QSize
 from PySide6.QtGui import QImage, QImageReader, QPixmap, QPainter, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                              QProgressBar, QPushButton, QVBoxLayout, QMenu)
+                              QProgressBar, QPushButton, QVBoxLayout, QMenu, QListView)
 
 from ..services.review import get_work_item, list_work_items, update_work_items
 from ..db import read_session, write_session
-from ..models import Capture, Project, Session, Setting
+from ..models import Capture, Project, Setting
 from ..storage import media_path
 from . import colors
 from .windows import popup_css, screen_under_mouse
 from .glass import GlassDialog, get_text, paint_glass
 from .icons import app_logo, control_icon
 from .cards import TaskDeck
+from .date_filter import DATE_PRESETS, DateRangeDialog, date_range, utc_bounds
 from .backdrop import capture_backdrop, paint_backdrop
 
 
@@ -59,7 +60,8 @@ class InboxPanel(QFrame):
         self._preview_workers = ThreadPoolExecutor(max_workers=2, thread_name_prefix='previews')
         self.preview_ready.connect(self._preview_loaded)
         self.copy_ready.connect(self._images_copied)
-        self._session_signature = None
+        self._date_preset = 'all'
+        self._custom_dates = None
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle('Checkpoint')
@@ -96,14 +98,17 @@ class InboxPanel(QFrame):
         for label, status in (('Open', 'open'), ('Done / archived', 'done'), ('Deleted', 'deleted'), ('All', 'all')):
             self.status_picker.addItem(label, status)
         self.status_picker.setAccessibleName('Task status')
-        self.session_picker = QComboBox()
-        self.session_picker.addItem('All sessions', None)
-        self.session_picker.addItem('Without recording', '__unrecorded__')
-        self.session_picker.setAccessibleName('Session')
-        for picker in (self.status_picker, self.session_picker):
+        self.date_picker = QComboBox()
+        self.date_picker.setView(QListView(self.date_picker))
+        for label, preset in DATE_PRESETS:
+            self.date_picker.addItem(label, preset)
+        self.date_picker.setAccessibleName('Last modified date')
+        for picker in (self.status_picker, self.date_picker):
             picker.setObjectName('toolbarPicker')
             picker.setFixedSize(156, 48)
-            picker.currentIndexChanged.connect(self._filter_changed)
+        self.status_picker.currentIndexChanged.connect(self._filter_changed)
+        self.date_picker.currentIndexChanged.connect(self._date_changed)
+        self.date_picker.activated.connect(self._date_activated)
         self.settings_button = QPushButton()
         self.record_button = QPushButton()
         self.close_button = QPushButton()
@@ -297,7 +302,7 @@ class InboxPanel(QFrame):
             self.toolbar.setColumnStretch(column, 0)
         if wide:
             for column, widget in enumerate((self.logo, self.project_picker, self.search, self.status_picker,
-                                            self.session_picker, self.settings_button,
+                                            self.date_picker, self.settings_button,
                                             self.record_button, self.close_button)):
                 self.toolbar.addWidget(widget, 0, column)
             self.toolbar.setColumnStretch(1, 2)
@@ -309,7 +314,7 @@ class InboxPanel(QFrame):
                 self.toolbar.addWidget(widget, 0, column)
             self.toolbar.addWidget(self.search, 1, 0, 1, 3)
             self.toolbar.addWidget(self.status_picker, 1, 3, 1, 2)
-            self.toolbar.addWidget(self.session_picker, 1, 5, 1, 2)
+            self.toolbar.addWidget(self.date_picker, 1, 5, 1, 2)
             self.toolbar.setColumnStretch(1, 1)
         margin = 36 if wide else 22
         self.layout().setContentsMargins(margin, 24, margin, 24)
@@ -425,7 +430,7 @@ class InboxPanel(QFrame):
         except ValueError as error:
             self._notify(str(error))
             return
-        self.session_picker.setCurrentIndex(0)
+        self.date_picker.setCurrentIndex(0)
         self.refresh()
         self._notify('New session started for this project.')
 
@@ -459,10 +464,10 @@ class InboxPanel(QFrame):
         self.project_id = pid
         self.selected_id = self.undo_action = None
         self._clear_selection()
-        self._session_signature = None
-        self.session_picker.blockSignals(True)
-        self.session_picker.setCurrentIndex(0)
-        self.session_picker.blockSignals(False)
+        self._date_preset = 'all'
+        self.date_picker.blockSignals(True)
+        self.date_picker.setCurrentIndex(0)
+        self.date_picker.blockSignals(False)
         self._clear_notice()
         update_settings({'last_project_id': pid})
         self.refresh()
@@ -501,24 +506,37 @@ class InboxPanel(QFrame):
                 project.name = name.strip()[:200]
         self._load_projects()
 
-    def _load_sessions(self):
-        with read_session() as session:
-            rows = list(session.scalars(select(Session).where(Session.project_id == self.project_id).order_by(Session.started_at.desc())).all())
-            entries = [(row.id, f"{row.title or 'Recording'} · {row.started_at.astimezone().strftime('%d %b %H:%M')}") for row in rows]
-        signature = (self.project_id, tuple(entries))
-        if signature == self._session_signature:
+    def _date_changed(self):
+        preset = self.date_picker.currentData()
+        if preset != 'custom':
+            self._date_preset = preset
+            self._filter_changed()
+
+    def _date_activated(self, index):
+        if self.date_picker.itemData(index) != 'custom':
             return
-        chosen = self.session_picker.currentData()
-        self.session_picker.blockSignals(True)
-        self.session_picker.clear()
-        self.session_picker.addItem('All sessions', None)
-        self.session_picker.addItem('Without recording', '__unrecorded__')
-        for sid, title in entries:
-            self.session_picker.addItem(title, sid)
-            self.session_picker.setItemData(self.session_picker.count() - 1, title, Qt.ItemDataRole.ToolTipRole)
-        self.session_picker.setCurrentIndex(max(0, self.session_picker.findData(chosen)))
-        self.session_picker.blockSignals(False)
-        self._session_signature = signature
+        start, end = self._custom_dates or self._date_range()
+        if start is None:
+            start, end = date_range('today')
+        dialog = DateRangeDialog(start, end, self)
+        polling = self.timer.isActive()
+        self.timer.stop()
+        with self._child_window():
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        if accepted:
+            self._custom_dates = dialog.dates()
+            self._date_preset = 'custom'
+            self._filter_changed()
+        else:
+            self.date_picker.blockSignals(True)
+            self.date_picker.setCurrentIndex(self.date_picker.findData(self._date_preset))
+            self.date_picker.blockSignals(False)
+        dialog.deleteLater()
+        if polling and self.isVisible():
+            self.timer.start()
+
+    def _date_range(self):
+        return date_range(self._date_preset, self._custom_dates)
 
     def _filter_changed(self):
         self.selected_id = None
@@ -580,7 +598,10 @@ class InboxPanel(QFrame):
         if self.project_id != project_id:
             self.selected_id = self.undo_action = None
             self._clear_selection()
-            self._session_signature = None
+            self._date_preset = 'all'
+            self.date_picker.blockSignals(True)
+            self.date_picker.setCurrentIndex(0)
+            self.date_picker.blockSignals(False)
             self._clear_notice()
         self.project_id = project_id
         self.timer.stop()
@@ -654,12 +675,13 @@ class InboxPanel(QFrame):
         self._capture_paths.clear()
         previous_ids = [item['id'] for item in self.items]
         previous_index = previous_ids.index(self.selected_id) if self.selected_id in previous_ids else 0
-        self._load_sessions()
+        start, end = self._date_range()
+        modified_since, modified_before = utc_bounds(start, end)
         status = self.status_picker.currentData()
         statuses = {'open': ['open', 'in_progress'], 'done': ['done', 'wont_do'], 'deleted': ['deleted'],
                     'all': ['open', 'in_progress', 'done', 'wont_do', 'deleted']}[status]
         self.items = list(reversed(list_work_items(self.project_id, q=self.search.text(), statuses=statuses,
-                                     session_id=self.session_picker.currentData()))) if self.project_id else []
+                                     modified_since=modified_since, modified_before=modified_before))) if self.project_id else []
         recording = self.recording_status() if self.recording_status else {}
         self.project_picker.setEnabled(not recording.get('active'))
         self._refresh_record_button(recording)
@@ -671,7 +693,8 @@ class InboxPanel(QFrame):
             self.audio_status.setText('Audio recording is off')
         self._refresh_processing(recording)
         self._update_loading_card()
-        self.session_picker.setToolTip(self.session_picker.currentText())
+        self.date_picker.setToolTip(f'Last modified: {start:%d %b %Y} – {end:%d %b %Y} (inclusive)'
+                                   if start else 'Last modified: All dates')
         self.images_button.setEnabled(bool(self.project_id))
         self.images_button.setText({'done': 'Open done images', 'deleted': 'Open deleted images'}.get(status, 'Open task images'))
         self.images_hint.setText({'done': 'Finished tasks — stored separately from unfinished tasks',
@@ -728,7 +751,8 @@ class InboxPanel(QFrame):
             self._pixmap(self._detail(self.items[neighbour]))
 
     def _position_key(self):
-        return f"{self.project_id}:{self.status_picker.currentData()}:{self.session_picker.currentData()}"
+        start, end = self._date_range()
+        return f"{self.project_id}:{self.status_picker.currentData()}:modified:{start}:{end}"
 
     def _saved_selection(self):
         if self.search.text().strip():
@@ -761,10 +785,11 @@ class InboxPanel(QFrame):
     def _update_loading_card(self):
         from ..transcription.worker import transcription_status
         message = ''
-        session_id = self.session_picker.currentData()
+        start, end = self._date_range()
+        today = date_range('today')[0]
         if (self.project_id and self.status_picker.currentData() in ('open', 'all')
-                and session_id != '__unrecorded__' and not self.search.text().strip()):
-            counts = transcription_status(session_id, project_id=self.project_id)
+                and (start is None or start <= today <= end) and not self.search.text().strip()):
+            counts = transcription_status(project_id=self.project_id)
             worker = self.processing_status() if self.processing_status else {}
             if not worker.get('error') and worker.get('model_installed', True):
                 if counts.get('running'):

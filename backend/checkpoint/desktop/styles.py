@@ -54,6 +54,12 @@ QAbstractItemView, QComboBox QAbstractItemView {{ background: {css(c.surface_2)}
     selection-background-color: {css(c.selected)}; selection-color: {css(c.text)}; outline: none; }}
 QAbstractItemView::item {{ min-height: 28px; padding: 3px 6px; }}
 QAbstractItemView::item:selected {{ background: {css(c.selected)}; color: {css(c.text)}; }}
+QCalendarWidget {{ background: {field}; border: 1px solid {rim}; border-radius: 16px; }}
+QCalendarWidget QWidget#qt_calendar_navigationbar {{ background: transparent; }}
+QCalendarWidget QAbstractItemView {{ background: {css(c.surface_2)}; border: none; border-radius: 0;
+    selection-background-color: {css(c.accent)}; selection-color: {css(c.on_accent)}; }}
+QCalendarWidget QAbstractItemView::item {{ min-height: 24px; padding: 2px; }}
+QCalendarWidget QAbstractItemView::item:selected {{ background: {css(c.accent)}; color: {css(c.on_accent)}; }}
 QHeaderView::section {{ background: {css(c.surface_3)}; color: {css(c.text_2)}; padding: 10px; border: none; border-bottom: 1px solid {css(c.border)}; }}
 QMenu {{ background: {css(c.surface_2)}; color: {css(c.text)}; border: 1px solid {css(c.border)}; border-radius: 12px; padding: 6px; }}
 QMenu::item {{ padding: 8px 18px; border-radius: 8px; }}

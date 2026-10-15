@@ -111,7 +111,7 @@ def test_toolbar_fits_and_keeps_record_next_to_settings(app_env, width):
     panel.toggle(default_project_id())
     panel.resize(width, 800)
     app.processEvents()
-    controls = [panel.project_picker, panel.search, panel.status_picker, panel.session_picker,
+    controls = [panel.project_picker, panel.search, panel.status_picker, panel.date_picker,
                 panel.settings_button, panel.record_button, panel.close_button]
     for control in controls:
         assert panel.rect().contains(control.geometry())
