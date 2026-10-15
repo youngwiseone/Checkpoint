@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mic, MonitorSpeaker, Pause, Play, Square, RotateCw, Camera, Sparkles } from "lucide-react";
 import { api } from "../api";
 import type { SessionDetail, SourceStatus, TimelineItem } from "../types";
-import { Banner, Meter, Modal, Toggle, fmtOffset, useToast, Lightbox } from "../components/ui";
+import { Banner, Meter, Modal, Toggle, fmtOffset, useToast, Lightbox, START_SCRIPT } from "../components/ui";
 import Checklist from "../components/Checklist";
 import RecordingChips, { type ChipState } from "../components/RecordingChips";
 import { useAppState, useSettings } from "../state";
@@ -162,7 +162,7 @@ export default function ActiveSession() {
             <div className="card-head"><h3>Capture</h3>
               <span className="kbd-hints">Tap capture · double tap to edit · hold to review · tap then hold to dictate</span>
             </div>
-            {!state!.desktop.available && <Banner kind="warn">Global hotkeys need the desktop helper. Launch Checkpoint with <code>start.cmd</code>.</Banner>}
+            {!state!.desktop.available && <Banner kind="warn">Global hotkeys need the desktop helper. Launch Checkpoint with <code>{START_SCRIPT}</code>.</Banner>}
             {state!.desktop.available && state!.desktop.hotkeys.ok === false && <Banner kind="warn">Shortcut problem: {state!.desktop.hotkeys.reason}. <Link to="/settings">Change shortcuts</Link></Banner>}
             {s.paused && <Banner kind="warn">Paused: no audio is being recorded. Screenshots and notes still work{sources.length ? " — double tap capture to add a note." : "."}</Banner>}
             {!sources.length && <Banner kind="info">No audio selected. Double tap capture to add a note.</Banner>}

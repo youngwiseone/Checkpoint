@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from .. import __version__
-from ..config import paths, set_data_dir_pointer
+from ..config import IS_LINUX, START_SCRIPT, paths, set_data_dir_pointer
 from ..db import read_session, write_session
 from ..events import hooks, notices
 from ..models import (
@@ -79,7 +79,8 @@ def state(after: int = 0) -> dict:
         "session": c.sessions.status(),
         "review": rv.review_counts(),
         "workers": c.worker_status(),
-        "desktop": {"available": hooks.desktop_available, "hotkeys": hooks.hotkey_status()},
+        "desktop": {"available": hooks.desktop_available, "hotkeys": hooks.hotkey_status(),
+                    "platform": "linux" if IS_LINUX else "windows"},
         "notices": notices.since(after),
         "ai_enabled": st.ai.enabled,
     }
@@ -105,17 +106,19 @@ def readiness() -> dict:
     elif mons:
         checks.append({"id": "screenshot", "label": "Screenshot capture", "state": "warning",
                        "detail": "Desktop helper isn't running, so global hotkeys are unavailable.",
-                       "remedy": "Launch with start.cmd to get the tray icon and hotkeys."})
+                       "remedy": f"Launch with {START_SCRIPT} to get the tray icon and hotkeys."})
     else:
         checks.append({"id": "screenshot", "label": "Screenshot capture", "state": "error", "detail": "No displays detected."})
     ok, why = audio_available()
     devs = list_devices() if ok else {"mic": [], "loopback": []}
     checks.append({"id": "mic", "label": "Microphone", "state": "ready" if devs["mic"] else "unavailable",
                    "detail": f"{len(devs['mic'])} input device(s)" if devs["mic"] else (why or "No microphone found"),
-                   "remedy": None if devs["mic"] else "Optional. Connect a microphone and check Windows privacy settings (Microphone access)."})
+                   "remedy": None if devs["mic"] else ("Optional. Connect a microphone and check it isn't muted in your sound settings." if IS_LINUX
+                                                       else "Optional. Connect a microphone and check Windows privacy settings (Microphone access).")})
     checks.append({"id": "loopback", "label": "Computer audio", "state": "ready" if devs["loopback"] else "unavailable",
                    "detail": f"{len(devs['loopback'])} output device(s) can be recorded" if devs["loopback"] else (why or "No output devices found"),
-                   "remedy": None if devs["loopback"] else "Optional. Requires a WASAPI output device."})
+                   "remedy": None if devs["loopback"] else ("Optional. Needs PulseAudio or PipeWire (pipewire-pulse) with pactl and parec." if IS_LINUX
+                                                            else "Optional. Requires a WASAPI output device.")})
     m = st.transcription.model
     checks.append({"id": "transcription", "label": "Transcription model", "state": "ready" if model_installed(m) else "unavailable",
                    "detail": f"{m} installed" if model_installed(m) else f"{m} not downloaded",
@@ -1161,7 +1164,10 @@ def share_config(body: ShareConfigIn) -> dict:
         raise _bad(e) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Couldn't connect to {url}: {e.__class__.__name__}") from e
-    save_token(url, token)
+    try:
+        save_token(url, token)
+    except SharingError as e:
+        raise _bad(e) from e
     update_settings({"sharing": {"server_url": url, "display_name": body.display_name.strip()}})
     core().sync.wake()
     return {"ok": True, "workspace": ws}

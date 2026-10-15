@@ -2,8 +2,8 @@
 
 Threads
 - Qt main thread: tray, note window, toasts (all widgets live here).
-- hotkeys thread: Win32 message loop; grabs the screenshot *immediately* on the
-  key press, then signals the Qt thread to show UI.
+- hotkeys thread: Win32 message loop (Linux: the trigger socket listener); grabs the
+  screenshot *immediately* on the key press, then signals the Qt thread to show UI.
 - workers: transcription / organiser / sync, supervised by the core.
 """
 
@@ -20,6 +20,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
+from ..capture import linux
 from ..core import get_core
 from ..events import hooks, notices
 from ..settings_store import get_settings
@@ -414,7 +415,11 @@ class DesktopHost:
                 menu.addAction(a)
         self.tray.setContextMenu(menu)
         self.tray.messageClicked.connect(self._on_message_clicked)
-        self.tray.activated.connect(lambda reason: self.open_ui() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+        # Linux trays (StatusNotifierItem) report a left click as Trigger and rarely send double clicks.
+        open_on = {QSystemTrayIcon.ActivationReason.DoubleClick}
+        if sys.platform.startswith("linux"):
+            open_on.add(QSystemTrayIcon.ActivationReason.Trigger)
+        self.tray.activated.connect(lambda reason: self.open_ui() if reason in open_on else None)
         self.tray.show()
         self._menu = menu
         self.timer = QTimer(interval=1000, timeout=self._refresh_tray)
@@ -547,10 +552,35 @@ class DesktopHost:
             self.core.shutdown()
             self.local_server.close()
 
+    def _publish_screens(self) -> None:
+        """Wayland: the portal screenshot covers every display; Qt knows where each one is."""
+        primary = self.app.primaryScreen()
+        linux.set_screens([
+            {"name": sc.name(), "left": sc.geometry().x(), "top": sc.geometry().y(),
+             "width": sc.geometry().width(), "height": sc.geometry().height(), "primary": sc is primary}
+            for sc in self.app.screens()
+        ])
+
+    def _watch_screens(self) -> None:
+        def watch(sc) -> None:  # noqa: ANN001
+            sc.geometryChanged.connect(self._publish_screens)
+
+        for sc in self.app.screens():
+            watch(sc)
+        self.app.screenAdded.connect(lambda sc: (watch(sc), self._publish_screens()))
+        self.app.screenRemoved.connect(lambda _sc: self._publish_screens())
+        self.app.primaryScreenChanged.connect(lambda _sc: self._publish_screens())
+        self._publish_screens()
+
     # ------------------------------------------------------------ run
     def run(self) -> int:
-        from .hotkeys import HotkeyThread
+        if sys.platform.startswith("linux"):
+            from .shortcuts_linux import ShortcutListener as HotkeyThread
+        else:
+            from .hotkeys import HotkeyThread
 
+        if linux.use_portal():
+            self._watch_screens()
         self._listen()
         self.core.start()
         self._install_hooks()
@@ -566,7 +596,8 @@ class DesktopHost:
         if not summary["ok"]:
             msg = summary.get("reason") or "Some shortcuts couldn't be registered."
             notices.push("warning", f"Shortcut problem: {msg}. Change them in Settings → Shortcuts.", "hotkeys")
-            self.tray.showMessage("Shortcut conflict", msg[:200], QSystemTrayIcon.MessageIcon.Warning, 8000)
+            self.tray.showMessage("Shortcut problem" if summary.get("external") else "Shortcut conflict", msg[:200],
+                                  QSystemTrayIcon.MessageIcon.Warning, 8000)
         self.app.aboutToQuit.connect(lambda: None if self._quitting else self.shutdown())
         log.info("Desktop host running with native popups")
         print("Checkpoint is running in the tray. Hold the capture key to review; tap, release, then hold to dictate a note.")

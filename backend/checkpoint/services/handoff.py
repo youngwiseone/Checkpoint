@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -282,5 +284,8 @@ def write_folder(item_ids: list[str], include_screenshots: bool, include_excerpt
 
     folder = images_folder(item_ids, include_screenshots, include_excerpts)
     if os.name == "nt":
-        os.startfile(folder)
+        os.startfile(folder)  # noqa: S606 - opens our own export folder in Explorer
+    elif shutil.which("xdg-open"):
+        subprocess.Popen(["xdg-open", str(folder)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
     return folder

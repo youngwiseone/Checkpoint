@@ -1,5 +1,12 @@
-"""Native Windows voice playback with a single play/stop control."""
+"""Native voice playback with a single play/stop control.
+
+Windows plays through winsound; Linux through the sound server's own player
+(paplay or pw-play, falling back to ALSA's aplay), so no media backend is needed.
+"""
 import io
+import shutil
+import subprocess
+import sys
 import tempfile
 import wave
 from pathlib import Path
@@ -15,6 +22,7 @@ class VoicePlayback:
         self.button, self.on_error = button, on_error
         self.timer = QTimer(button, singleShot=True, timeout=self._next)
         self.path = None
+        self.player = None
         self.queue = []
         self.entries = []
         self.button.clicked.connect(self.toggle)
@@ -35,7 +43,6 @@ class VoicePlayback:
             self.stop()
             return
         try:
-            import winsound
             data = evidence_audio(self.queue.pop(0))
             with wave.open(io.BytesIO(data), 'rb') as wav:
                 duration = wav.getnframes() / wav.getframerate()
@@ -44,7 +51,7 @@ class VoicePlayback:
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as output:
                 output.write(data)
                 self.path = Path(output.name)
-            winsound.PlaySound(str(self.path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+            self._play(self.path)
             self.button.setIcon(control_icon('stop'))
             self.button.setToolTip('Stop voice playback')
             self.timer.start(max(1, int(duration * 1000) + 100))
@@ -55,13 +62,37 @@ class VoicePlayback:
     def stop(self):
         self.timer.stop()
         self.queue = []
-        try:
-            import winsound
-            winsound.PlaySound(None, 0)
-        except (ImportError, RuntimeError):
-            pass
+        self._silence()
         if self.path:
             self.path.unlink(missing_ok=True)
             self.path = None
         self.button.setIcon(control_icon('play'))
         self.button.setToolTip('Play voice note')
+
+    def _play(self, path):
+        if sys.platform == 'win32':
+            import winsound
+            winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+            return
+        self._silence()
+        player = next((p for p in ('paplay', 'pw-play', 'aplay') if shutil.which(p)), None)
+        if player is None:
+            raise RuntimeError('No audio player found. Install PulseAudio or PipeWire utilities (paplay or pw-play).')
+        self.player = subprocess.Popen([player, str(path)], stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _silence(self):
+        if sys.platform == 'win32':
+            try:
+                import winsound
+                winsound.PlaySound(None, 0)
+            except (ImportError, RuntimeError):
+                pass
+        elif self.player is not None:
+            if self.player.poll() is None:
+                self.player.terminate()
+                try:
+                    self.player.wait(1)
+                except subprocess.TimeoutExpired:
+                    self.player.kill()
+            self.player = None

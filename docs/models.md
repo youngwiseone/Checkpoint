@@ -6,7 +6,8 @@ and recorded audio is kept safely until you decide to transcribe it.
 ## Transcription (faster-whisper)
 
 1. Settings → Transcription → **Download** next to `base.en` (≈145 MB, recommended starting point).
-   Progress and errors are shown there. Files go to `%LOCALAPPDATA%\Checkpoint\models\whisper\<name>`.
+   Progress and errors are shown there. Files go to `%LOCALAPPDATA%\Checkpoint\models\whisper\<name>`
+   (Linux: `~/.local/share/Checkpoint/models/whisper/<name>`).
 2. After downloading, transcription runs fully offline.
 
 | Model | Size | Notes |
@@ -26,7 +27,7 @@ and recorded audio is kept safely until you decide to transcribe it.
 
 ## Local AI organisation (Ollama)
 
-1. Install Ollama for Windows from https://ollama.com. Checkpoint starts its local service
+1. Install Ollama from https://ollama.com (or your Linux distribution's package). Checkpoint starts its local service
    (`ollama serve` on `http://127.0.0.1:11434`) in the background whenever AI features need it.
 2. Settings → Local AI → **Download qwen3:4b with Ollama** (≈2.5 GB), or run `ollama pull qwen3:4b`.
 3. Turn **Local AI organisation** on. New sessions can then enable “Organise with local AI after the session”,
