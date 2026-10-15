@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Download, Save} from "lucide-react";
 import { api } from "../api";
 import type { HotkeyBinding, Project, Settings } from "../types";
-import { Banner, Spinner, Toggle, fmtBytes, useToast } from "../components/ui";
+import { Banner, START_SCRIPT, Spinner, Toggle, fmtBytes, useToast } from "../components/ui";
 import { useAppState, useProjects } from "../state";
 import { ReadinessList } from "./Welcome";
 import { ProjectModal } from "./Home";
@@ -33,26 +33,44 @@ function Shortcuts({ s }: { s: Settings }) {
   const { data: state } = useAppState();
   const toast = useToast();
   const bindings = state?.desktop.hotkeys.bindings ?? [];
-  const labels: Record<string, string> = { capture: "Capture screenshot", capture_context: "Screenshot + always ask for a note", quick_note: "Text-only quick note", start_session: "Start session (press twice to end)", review: "Review overlay", switch_project: "Switch or set up a project" };
+  const external = state?.desktop.platform === "linux";
+  const labels: Record<string, string> = { capture: "Capture screenshot", capture_context: "Screenshot + always ask for a note", quick_note: "Text-only quick note", start_session: "Start session (press twice to end)", review: "Review overlay", voice: "Voice note (press again to save)", switch_project: "Switch or set up a project" };
   const save = () => patch.mutate({ hotkeys: hk }, {
     onSuccess: (r) => {
       if (r.hotkeys && !r.hotkeys.ok) toast("warning", `Some shortcuts couldn't be registered: ${r.hotkeys.reason}`);
-      else toast("success", "Shortcuts updated");
+      else toast("success", external ? "Saved. Bind the same keys in your desktop's shortcut settings." : "Shortcuts updated");
     },
   });
   return (
     <div className="stack-lg">
       <div className="card stack">
         <h3>Global shortcuts</h3>
-        <p className="text-2 small">Registered with Windows so they work in games and other apps. Use F-keys, or combine a key with Ctrl/Alt/Shift (e.g. <code>Ctrl+Alt+S</code>).</p>
-        {!state?.desktop.available && <Banner kind="warn">The desktop helper isn't running, so shortcuts aren't active. Launch with <code>start.cmd</code>.</Banner>}
-        {(["capture", "review"] as const).map((k) => {
+        {external ? (
+          <p className="text-2 small">
+            On Linux your desktop owns global shortcuts. Add a custom shortcut for each command below, using the keys shown
+            (COSMIC: <b>Settings → Input Devices → Keyboard → Keyboard shortcuts → Custom shortcuts</b>; GNOME and KDE have the same under Keyboard).
+            A shortcut can't tell how long a key is held, so each gesture gets its own command. The keys you type here are only a reminder.
+          </p>
+        ) : (
+          <p className="text-2 small">Registered with Windows so they work in games and other apps. Use F-keys, or combine a key with Ctrl/Alt/Shift (e.g. <code>Ctrl+Alt+S</code>).</p>
+        )}
+        {!state?.desktop.available && <Banner kind="warn">The desktop helper isn't running, so shortcuts aren't active. Launch with <code>{START_SCRIPT}</code>.</Banner>}
+        {((external ? ["capture", "review", "voice"] : ["capture", "review"]) as ("capture" | "review" | "voice")[]).map((k) => {
           const b = bindings.find((x) => x.action === k);
           return (
             <div key={k} className="row">
               <label htmlFor={`hk-${k}`} className="label" style={{ width: 280 }}>{labels[k]}</label>
-              <input id={`hk-${k}`} className="input mono" style={{ width: 180 }} value={hk[k] ?? ""} onChange={(e) => setHk({ ...hk, [k]: e.target.value })} />
-              {b && (b.registered ? <span className="badge success">Active</span> : <span className="badge danger" title={b.error ?? ""}>{b.error}</span>)}
+              {k === "voice" ? <span style={{ width: 180 }} /> : (
+                <input id={`hk-${k}`} className="input mono" style={{ width: 180 }} value={hk[k] ?? ""} onChange={(e) => setHk({ ...hk, [k]: e.target.value })} />
+              )}
+              {b && !b.external && (b.registered ? <span className="badge success">Active</span> : <span className="badge danger" title={b.error ?? ""}>{b.error}</span>)}
+              {b?.external && b.error && <span className="badge danger" title={b.error}>Not listening</span>}
+              {b?.command && (
+                <>
+                  <code className="small" style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{b.command}</code>
+                  <button className="btn" onClick={() => navigator.clipboard.writeText(b.command!).then(() => toast("success", "Command copied"), (e: Error) => toast("error", e.message))}>Copy</button>
+                </>
+              )}
             </div>
           );
         })}

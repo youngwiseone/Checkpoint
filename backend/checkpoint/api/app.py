@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 MISSING_UI = """<!doctype html><meta charset=utf-8><title>Checkpoint</title>
 <body style="font:16px system-ui;background:#15171c;color:#e8e9ec;padding:48px">
-<h1>Checkpoint</h1><p>The interface hasn't been built yet. Run <code>setup.ps1</code> (or <code>npm run build</code> in <code>frontend/</code>) and restart.</p></body>"""
+<h1>Checkpoint</h1><p>The interface hasn't been built yet. Run <code>setup.ps1</code> / <code>setup.sh</code> (or <code>npm run build</code> in <code>frontend/</code>) and restart.</p></body>"""
 
 
 def create_app(auth: AuthState) -> FastAPI:

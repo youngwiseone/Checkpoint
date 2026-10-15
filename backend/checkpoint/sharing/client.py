@@ -47,8 +47,13 @@ def _kr_user(url: str) -> str:
 
 def save_token(url: str, token: str) -> None:
     import keyring
+    from keyring.errors import KeyringError
 
-    keyring.set_password(KEYRING_SERVICE, _kr_user(url), token)
+    try:
+        keyring.set_password(KEYRING_SERVICE, _kr_user(url), token)
+    except KeyringError as e:
+        # Linux: needs a Secret Service provider (GNOME Keyring, KWallet, KeePassXC) running.
+        raise SharingError(f"The token couldn't be saved in the system keyring: {e}") from e
 
 
 def load_token(url: str) -> Optional[str]:

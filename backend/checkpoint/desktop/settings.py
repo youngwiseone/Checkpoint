@@ -1,4 +1,6 @@
 """Native settings; no HTTP server or browser is needed."""
+import sys
+
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialogButtonBox,
                               QFormLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -61,11 +63,23 @@ class SettingsDialog(GlassDialog):
             project_actions.addWidget(button)
         general.addRow(project_actions)
         self.capture_key = QLineEdit(st.hotkeys.capture)
-        general.addRow("Capture key", self.capture_key)
-        hint = QLabel("Tap: screenshot · Double tap: edit last task · Hold: menu · Tap then hold: voice note")
-        hint.setObjectName('muted')
-        hint.setWordWrap(True)
-        general.addRow(hint)
+        if sys.platform.startswith("linux"):
+            # The desktop owns global shortcuts on Linux; show the commands to bind there.
+            from .. import trigger
+            hint = QLabel("Add these as custom shortcuts in your desktop's keyboard settings:")
+            hint.setWordWrap(True)
+            general.addRow(hint)
+            for action, label in (("capture", "Screenshot (press twice: edit last task)"), ("review", "Menu"),
+                                  ("voice", "Voice note (press again to save)")):
+                command = QLineEdit(trigger.command(action))
+                command.setReadOnly(True)
+                general.addRow(label, command)
+        else:
+            general.addRow("Capture key", self.capture_key)
+            hint = QLabel("Tap: screenshot · Double tap: edit last task · Hold: menu · Tap then hold: voice note")
+            hint.setObjectName('muted')
+            hint.setWordWrap(True)
+            general.addRow(hint)
         self.region = combo([("Active display", "foreground_monitor"), ("Active window", "foreground_window")], st.capture.region)
         general.addRow("Screenshot area", self.region)
 
@@ -217,13 +231,14 @@ class SettingsDialog(GlassDialog):
                 self.message.setText(str(error))
 
     def _save(self):
-        from .hotkeys import parse
         try:
             capture = self.capture_key.text().strip()
             review = ""
-            capture_binding = parse(capture)
-            if review and parse(review) == capture_binding:
-                raise ValueError("Capture and review must use different keys. Leave review empty to use only one key.")
+            if not sys.platform.startswith("linux"):
+                from .hotkeys import parse
+                capture_binding = parse(capture)
+                if review and parse(review) == capture_binding:
+                    raise ValueError("Capture and review must use different keys. Leave review empty to use only one key.")
             update_settings({"last_project_id": self.project.currentData(), "first_run_complete": True,
                              "hotkeys": {"capture": capture, "review": review},
                              "capture": {"region": self.region.currentData()},

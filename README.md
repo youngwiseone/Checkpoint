@@ -4,7 +4,7 @@
 
 Capture issues. Turn them into to-dos. Work through them with your assistant.
 
-Checkpoint is a Windows app for recording bugs, design changes and feature ideas in games, apps or anything else on your screen. Save a screenshot with a typed or dictated note, then send it to Codex or Claude to work through.
+Checkpoint is a Windows and Linux app for recording bugs, design changes and feature ideas in games, apps or anything else on your screen. Save a screenshot with a typed or dictated note, then send it to Codex or Claude to work through.
 
 It runs quietly in the background until you need it. Capturing and reviewing tasks works locally, without AI tokens, internet or a server.
 
@@ -23,6 +23,27 @@ You'll need **Windows 10/11** and **Python 3.11 or newer**.
 4. Hold **F9** and choose or create a project to group your captures.
 
 Next time, just double-click **start.cmd**. Closing the review window leaves Checkpoint running in the system tray. Use **Quit** in the tray to exit.
+
+### Linux
+
+You'll need **Python 3.11+**, **Node.js 20+** (to build the interface), PulseAudio or PipeWire (`pactl`/`parec`) for audio and, on Wayland, an xdg-desktop-portal backend for screenshots. Tested on Void Linux (musl) with COSMIC on Wayland.
+
+```bash
+./setup.sh
+./start.sh            # or ./start.sh --console to stay attached to the terminal
+```
+
+If pip has no PySide6 for your system (musl distributions such as Void or Alpine), `setup.sh` tells you which distro package to install.
+
+Wayland doesn't let apps grab keys or tell how long one is held, so bind each gesture to its own custom shortcut in your desktop's keyboard settings (COSMIC: Settings → Input Devices → Keyboard → Keyboard shortcuts → Custom shortcuts). **Settings → General** shows the exact commands:
+
+| Command | Same as |
+|---|---|
+| `.venv/bin/python backend/checkpoint/trigger.py capture` | Tap **F9** (press twice quickly to edit the last task) |
+| `.venv/bin/python backend/checkpoint/trigger.py review` | Hold **F9** |
+| `.venv/bin/python backend/checkpoint/trigger.py voice` | Tap, then hold **F9**: press once to start the voice note, again to save it |
+
+On Wayland, screenshots go through the desktop portal and capture the primary display (apps can't see the active window there), and toasts appear as desktop notifications. Data lives in `~/.local/share/Checkpoint`.
 
 ## Capture and review
 
