@@ -1,7 +1,7 @@
 """Native task and screenshot editors."""
-from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QComboBox, QDialogButtonBox, QHBoxLayout, QLabel,
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (QDialogButtonBox, QHBoxLayout, QLabel,
                               QPlainTextEdit, QPushButton, QSizePolicy)
 
 from ..db import read_session
@@ -12,6 +12,7 @@ from .windows import popup_css
 from . import colors
 from .glass import GlassDialog
 from .icons import control_icon
+from .screenshot import ScreenshotDialog
 
 
 def capture_path(capture_id, original=False):
@@ -22,120 +23,6 @@ def capture_path(capture_id, original=False):
             raise ValueError("Screenshot not found")
         path = original_path(capture) if original else media_path(capture.image_rel_path)
         return path if path.exists() else media_path(capture.image_rel_path)
-
-
-class SelectionImage(QLabel):
-    """Draw a selection in image coordinates, excluding letterbox margins."""
-    def __init__(self):
-        super().__init__()
-        self.source = QPixmap()
-        self.selection = None
-        self.start = None
-        self.setMinimumSize(260, 220)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCursor(Qt.CursorShape.CrossCursor)
-
-    def load(self, path):
-        self.source = QPixmap(str(path))
-        self.selection = self.start = None
-        self.update()
-
-    def image_rect(self):
-        if self.source.isNull():
-            return QRect()
-        size = self.source.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
-        return QRect((self.width() - size.width()) // 2, (self.height() - size.height()) // 2, size.width(), size.height())
-
-    def _point(self, point):
-        rect = self.image_rect()
-        return QPoint(max(rect.left(), min(rect.right(), point.x())), max(rect.top(), min(rect.bottom(), point.y())))
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.image_rect().contains(event.position().toPoint()):
-            self.start = self._point(event.position().toPoint())
-            self.selection = QRect(self.start, self.start)
-            self.update()
-
-    def mouseMoveEvent(self, event):
-        if self.start is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self.selection = QRect(self.start, self._point(event.position().toPoint())).normalized()
-            self.update()
-
-    def mouseReleaseEvent(self, event):
-        if self.start is not None:
-            self.selection = QRect(self.start, self._point(event.position().toPoint())).normalized()
-            self.start = None
-            self.update()
-
-    def box(self):
-        rect = self.image_rect()
-        if self.selection is None or self.selection.width() < 3 or self.selection.height() < 3 or rect.isEmpty():
-            raise ValueError("Drag a rectangle over the image first.")
-        x = int((self.selection.left() - rect.left()) * self.source.width() / rect.width())
-        y = int((self.selection.top() - rect.top()) * self.source.height() / rect.height())
-        right = min(self.source.width(), round((self.selection.right() + 1 - rect.left()) * self.source.width() / rect.width()))
-        bottom = min(self.source.height(), round((self.selection.bottom() + 1 - rect.top()) * self.source.height() / rect.height()))
-        return x, y, max(1, right - x), max(1, bottom - y)
-
-    def resizeEvent(self, event):
-        self.selection = self.start = None
-        super().resizeEvent(event)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(colors.current().border, 1))
-        painter.setBrush(colors.current().field)
-        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 16, 16)
-        if self.source.isNull():
-            painter.setPen(colors.current().muted)
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Screenshot unavailable")
-            return
-        painter.drawPixmap(self.image_rect(), self.source)
-        if self.selection:
-            painter.setPen(QPen(QColor("#ff4040"), 2))
-            painter.drawRect(self.selection)
-
-
-class ScreenshotDialog(GlassDialog):
-    def __init__(self, capture_id, parent=None):
-        super().__init__(parent)
-        self.capture_id = capture_id
-        self.setWindowTitle("Edit image")
-        self.resize(900, 650)
-        self.setStyleSheet(popup_css(colors.current()))
-        layout = self.content_layout()
-        self.mode = QComboBox()
-        self.mode.addItem("Crop from original", "crop")
-        self.mode.addItem("Highlight rectangle on current image", "highlight")
-        layout.addWidget(self.mode)
-        self.image = SelectionImage()
-        layout.addWidget(self.image, 1)
-        self.message = QLabel("Drag to select an area. The original is always preserved.")
-        self.message.setObjectName('muted')
-        self.message.setWordWrap(True)
-        layout.addWidget(self.message)
-        actions = QHBoxLayout()
-        for label, callback in (("Restore original", lambda: self._save(True)), ("Cancel", self.reject), ("Save", self._save)):
-            button = QPushButton(label)
-            if label == 'Save':
-                button.setObjectName('primary')
-            button.clicked.connect(callback)
-            actions.addWidget(button)
-        layout.addLayout(actions)
-        self.mode.currentIndexChanged.connect(self._load)
-        self._load()
-
-    def _load(self):
-        self.image.load(capture_path(self.capture_id, self.mode.currentData() == "crop"))
-
-    def _save(self, reset=False):
-        from ..services.cropping import crop
-        try:
-            crop(self.capture_id, None if reset else self.image.box(), highlight=not reset and self.mode.currentData() == "highlight")
-            self.accept()
-        except (ValueError, OSError) as error:
-            self.message.setText(str(error))
 
 
 class TaskImagePreview(QLabel):

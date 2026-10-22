@@ -35,7 +35,10 @@ Next time, just double-click **start.cmd**. Closing the review window leaves Che
 
 Type a note or click **Dictate note**, then **Save**. For voice notes, enable your microphone in **Settings → Audio** and download the speech model in **Settings → Transcript**.
 
-- Click the **pencil** to edit a task or its screenshots.
+- Click the **pencil** to edit a task or its screenshots. Quick notes and the main menu use the same image editor.
+- In **Edit image**, draw with **Pencil** or **Highlighter**, add **Shapes** or **Text**, and use **Eraser** to remove marks added in that editing session. Choose colors, stroke widths, and text sizes.
+- Select **Crop**, drag the area to keep, and click **Apply crop** to enlarge it in the editor. Use **+**, **−**, or **Fit** to change the zoom. **Undo/Redo** (Ctrl+Z / Ctrl+Y) works across annotations and crops.
+- Click **Save** (Ctrl+S) to keep your image edits, or **Cancel** to discard them. **Restore original** previews the untouched screenshot; save to keep the restoration.
 - Drag **up** to mark Done or **down** to delete. **Undo** restores the change.
 - **Shift** selects a range; **Ctrl-click** adds or removes individual tasks.
 

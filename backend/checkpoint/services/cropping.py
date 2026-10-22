@@ -14,6 +14,56 @@ def original_path(capture):
     return media_path(capture.image_rel_path).parent / f"{capture.id}_original.png"
 
 
+def save_image(capture_id: str, png: bytes, *, expected_sha: str, cropped: bool = False,
+               restored: bool = False) -> dict:
+    """Commit an editor preview without changing the preserved original.
+
+    Check the revision before writing so an editor left open cannot overwrite
+    another edit. Use the same revision/thumbnail workflow as legacy crops.
+    """
+    with write_session() as s:
+        c = s.get(Capture, capture_id)
+        if c is None or c.status == "discarded":
+            raise ValueError("Screenshot not found")
+        if c.sha256 != expected_sha:
+            raise ValueError("Screenshot changed elsewhere. Reopen the editor to load the latest image.")
+        with Image.open(io.BytesIO(png)) as image:
+            image.load()
+            image = image.convert("RGB")
+            return _store(s, c, image, cropped=cropped, restored=restored)
+
+
+def _store(s, c, image, *, cropped=False, restored=False):
+    current = media_path(c.image_rel_path)
+    original = original_path(c)
+    png = io.BytesIO()
+    image.save(png, "PNG")
+    width, height = image.size
+    image.thumbnail((480, 270))
+    thumb = io.BytesIO()
+    image.save(thumb, "JPEG", quality=85)
+    if not original.exists():
+        atomic_write_bytes(original, current.read_bytes())
+    # New filenames keep cached images and concurrent readers consistent.
+    folder = c.image_rel_path.rsplit("/", 1)[0]
+    revision = new_id()
+    image_rel = f"{folder}/{c.id}_{revision}.png"
+    thumb_rel = f"{folder}/{c.id}_{revision}_thumb.jpg"
+    atomic_write_bytes(media_path(image_rel), png.getvalue())
+    atomic_write_bytes(media_path(thumb_rel), thumb.getvalue())
+    c.image_rel_path, c.thumb_rel_path = image_rel, thumb_rel
+    c.width, c.height, c.sha256 = width, height, sha256_bytes(png.getvalue())
+    if cropped or restored:
+        c.monitor = {**(c.monitor or {}), 'cropped': cropped or c.trigger == 'snip'}
+    linked_ids = s.scalars(select(EvidenceLink.work_item_id).where(EvidenceLink.capture_id == c.id, EvidenceLink.work_item_id.is_not(None))).all()
+    for iid in linked_ids:
+        item = s.get(WorkItem, iid)
+        if item is not None:
+            item.human_updated_at = utcnow()
+            item.version += 1
+    return {"id": c.id, "width": width, "height": height, "revision": revision}
+
+
 def crop(capture_id: str, box: tuple[int, int, int, int] | None, *, highlight: bool = False) -> dict:
     with write_session() as s:
         c = s.get(Capture, capture_id)
@@ -35,29 +85,5 @@ def crop(capture_id: str, box: tuple[int, int, int, int] | None, *, highlight: b
                 else:
                     image = image.crop((x, y, x + width, y + height))
             image = image.convert("RGB")
-            png = io.BytesIO()
-            image.save(png, "PNG")
-            width, height = image.size
-            image.thumbnail((480, 270))
-            thumb = io.BytesIO()
-            image.save(thumb, "JPEG", quality=85)
-        if not original.exists():
-            atomic_write_bytes(original, current.read_bytes())
-        # New filenames keep cached images and concurrent readers consistent.
-        folder = c.image_rel_path.rsplit("/", 1)[0]
-        revision = new_id()
-        image_rel = f"{folder}/{c.id}_{revision}.png"
-        thumb_rel = f"{folder}/{c.id}_{revision}_thumb.jpg"
-        atomic_write_bytes(media_path(image_rel), png.getvalue())
-        atomic_write_bytes(media_path(thumb_rel), thumb.getvalue())
-        c.image_rel_path, c.thumb_rel_path = image_rel, thumb_rel
-        c.width, c.height, c.sha256 = width, height, sha256_bytes(png.getvalue())
-        if not highlight:
-            c.monitor = {**(c.monitor or {}), 'cropped': box is not None or c.trigger == 'snip'}
-        linked_ids = s.scalars(select(EvidenceLink.work_item_id).where(EvidenceLink.capture_id == c.id, EvidenceLink.work_item_id.is_not(None))).all()
-        for iid in linked_ids:
-            item = s.get(WorkItem, iid)
-            if item is not None:
-                item.human_updated_at = utcnow()
-                item.version += 1
-        return {"id": c.id, "width": width, "height": height, "revision": revision}
+            return _store(s, c, image, cropped=not highlight and box is not None,
+                          restored=not highlight and box is None)
