@@ -5,12 +5,15 @@ from dataclasses import dataclass
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QImage, QKeySequence, QPainter,
                            QPainterPath, QPainterPathStroker, QPen, QPixmap, QShortcut)
-from PySide6.QtWidgets import (QColorDialog, QComboBox, QHBoxLayout, QLabel, QPushButton,
-                               QScrollArea, QSpinBox, QWidget)
+from PySide6.QtWidgets import (QAbstractSpinBox, QColorDialog, QComboBox, QHBoxLayout,
+                               QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider,
+                               QSpinBox, QVBoxLayout, QWidget)
 
 from . import colors
 from .colors import css
 from .glass import GlassDialog, get_text
+from .icons import control_icon
+from .windows import screen_under_mouse
 
 
 @dataclass(frozen=True)
@@ -295,12 +298,20 @@ class ScreenshotDialog(GlassDialog):
                 raise ValueError('Screenshot not found')
             self.expected_sha = capture.sha256
         self.setWindowTitle('Edit image')
-        self.resize(1100, 800)
         theme = colors.current()
         self.setStyleSheet(self.styleSheet() + f'''
+QPushButton[imageControl="true"], QComboBox#imageShape, QSpinBox#imageValue {{
+    min-height: 20px; padding: 4px 10px; border-radius: 12px;
+}}
 QPushButton#imageTool:checked {{ background: {css(theme.selected)}; border: 2px solid {css(theme.accent)}; font-weight: 600; }}
+QPushButton#imageClose {{ padding: 0; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; border-radius: 15px; }}
+QSlider::groove:horizontal {{ height: 4px; background: {css(theme.border)}; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: {css(theme.accent)}; border-radius: 2px; }}
+QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {css(theme.accent)}; }}
 ''')
-        layout = self.content_layout()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
         self.image = ScreenshotCanvas()
         self.image.load(capture_path(capture_id))
         self.tool_buttons = {}
@@ -308,64 +319,102 @@ QPushButton#imageTool:checked {{ background: {css(theme.selected)}; border: 2px 
         self.tool_settings = {'pencil': ('#ff4040', 3), 'highlighter': ('#ffe600', 20),
                               'shape': ('#ff4040', 3), 'text': ('#ff4040', 3)}
         tools = QHBoxLayout()
+        tools.setSpacing(6)
         for key, label in (('pencil', 'Pencil'), ('highlighter', 'Highlighter'), ('eraser', 'Eraser'),
                            ('shape', 'Shapes'), ('text', 'Text'), ('crop', 'Crop')):
             button = QPushButton(label)
             button.setCheckable(True)
             button.setObjectName('imageTool')
+            button.setProperty('imageControl', True)
             button.clicked.connect(lambda checked=False, value=key: self.set_tool(value))
             self.tool_buttons[key] = button
             tools.addWidget(button)
+        tools.addStretch()
+        self.close_button = QPushButton()
+        self.close_button.setObjectName('imageClose')
+        self.close_button.setIcon(control_icon('close'))
+        self.close_button.setAccessibleName('Close image editor')
+        self.close_button.setToolTip('Close image editor')
+        self.close_button.clicked.connect(self.reject)
+        tools.addWidget(self.close_button)
         layout.addLayout(tools)
         options = QHBoxLayout()
+        options.setSpacing(6)
         self.shape = QComboBox()
+        self.shape.setObjectName('imageShape')
         for label, key in (('Rectangle', 'rectangle'), ('Ellipse', 'ellipse'), ('Line', 'line'), ('Arrow', 'arrow')):
             self.shape.addItem(label, key)
         self.shape.setAccessibleName('Shape')
         self.shape.currentIndexChanged.connect(lambda: self.set_tool('shape'))
         options.addWidget(self.shape)
         self.color_button = QPushButton('Color')
+        self.color_button.setProperty('imageControl', True)
         self.color_button.clicked.connect(self.choose_color)
         options.addWidget(self.color_button)
         self.stroke = QSpinBox()
+        self.stroke.setObjectName('imageValue')
+        self.stroke.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.stroke.setFixedWidth(68)
         self.stroke.setRange(1, 80)
         self.stroke.setValue(3)
         self.stroke.setSuffix(' px')
         self.stroke.setAccessibleName('Stroke width')
         self.stroke.valueChanged.connect(lambda value: setattr(self.image, 'stroke_width', value))
+        self.stroke_slider = QSlider(Qt.Orientation.Horizontal)
+        self.stroke_slider.setRange(self.stroke.minimum(), self.stroke.maximum())
+        self.stroke_slider.setValue(self.stroke.value())
+        self.stroke_slider.setMinimumWidth(70)
+        self.stroke_slider.setMaximumWidth(140)
+        self.stroke_slider.setAccessibleName('Stroke width slider')
+        self.stroke_slider.valueChanged.connect(self.stroke.setValue)
+        self.stroke.valueChanged.connect(self.stroke_slider.setValue)
         self.width_label = QLabel('Width')
         options.addWidget(self.width_label)
+        options.addWidget(self.stroke_slider)
         options.addWidget(self.stroke)
         self.font_size = QSpinBox()
+        self.font_size.setObjectName('imageValue')
+        self.font_size.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.font_size.setFixedWidth(76)
         self.font_size.setRange(8, 200)
         self.font_size.setValue(24)
         self.font_size.setSuffix(' px')
         self.font_size.setAccessibleName('Text size')
         self.font_size.valueChanged.connect(lambda value: setattr(self.image, 'font_size', value))
+        self.font_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_slider.setRange(self.font_size.minimum(), self.font_size.maximum())
+        self.font_slider.setValue(self.font_size.value())
+        self.font_slider.setMinimumWidth(70)
+        self.font_slider.setMaximumWidth(140)
+        self.font_slider.setAccessibleName('Text size slider')
+        self.font_slider.valueChanged.connect(self.font_size.setValue)
+        self.font_size.valueChanged.connect(self.font_slider.setValue)
         self.font_label = QLabel('Text size')
         options.addWidget(self.font_label)
+        options.addWidget(self.font_slider)
         options.addWidget(self.font_size)
         self.crop_button = QPushButton('Apply crop')
+        self.crop_button.setProperty('imageControl', True)
         self.crop_button.clicked.connect(self.apply_crop)
         options.addWidget(self.crop_button)
         options.addStretch()
-        layout.addLayout(options)
-        history = QHBoxLayout()
         self.undo_button = QPushButton('Undo')
+        self.undo_button.setProperty('imageControl', True)
         self.undo_button.clicked.connect(self.image.undo)
-        history.addWidget(self.undo_button)
+        options.addWidget(self.undo_button)
         self.redo_button = QPushButton('Redo')
+        self.redo_button.setProperty('imageControl', True)
         self.redo_button.clicked.connect(self.image.redo)
-        history.addWidget(self.redo_button)
-        history.addStretch()
+        options.addWidget(self.redo_button)
         for label, callback in (('−', lambda: self.zoom_by(.8)), ('+', lambda: self.zoom_by(1.25)), ('Fit', self.fit)):
             button = QPushButton(label)
+            button.setProperty('imageControl', True)
             button.setAccessibleName({'−': 'Zoom out', '+': 'Zoom in', 'Fit': 'Fit image to window'}[label])
             button.clicked.connect(callback)
-            history.addWidget(button)
+            options.addWidget(button)
         self.zoom_label = QLabel()
-        history.addWidget(self.zoom_label)
-        layout.addLayout(history)
+        options.addWidget(self.zoom_label)
+        layout.addLayout(options)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -373,17 +422,20 @@ QPushButton#imageTool:checked {{ background: {css(theme.selected)}; border: 2px 
         layout.addWidget(self.scroll, 1)
         self.message = QLabel()
         self.message.setWordWrap(True)
+        self.message.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.message.setObjectName('muted')
-        layout.addWidget(self.message)
         actions = QHBoxLayout()
         restore = QPushButton('Restore original')
+        restore.setProperty('imageControl', True)
         restore.clicked.connect(self.restore_original)
         actions.addWidget(restore)
-        actions.addStretch()
+        actions.addWidget(self.message, 1)
         cancel = QPushButton('Cancel')
+        cancel.setProperty('imageControl', True)
         cancel.clicked.connect(self.reject)
         actions.addWidget(cancel)
         self.save_button = QPushButton('Save')
+        self.save_button.setProperty('imageControl', True)
         self.save_button.setObjectName('primary')
         self.save_button.clicked.connect(self._save)
         actions.addWidget(self.save_button)
@@ -400,6 +452,11 @@ QPushButton#imageTool:checked {{ background: {css(theme.selected)}; border: 2px 
         self.refresh_color()
         self.refresh()
 
+    def place_on_screen(self):
+        screen = screen_under_mouse()
+        if screen:
+            self.setGeometry(screen.availableGeometry())
+
     def set_tool(self, tool):
         if self.active_tool in self.tool_settings:
             self.tool_settings[self.active_tool] = (self.image.color, self.image.stroke_width)
@@ -409,9 +466,9 @@ QPushButton#imageTool:checked {{ background: {css(theme.selected)}; border: 2px 
         for key, button in self.tool_buttons.items():
             button.setChecked(key == tool)
         self.shape.setVisible(tool == 'shape')
-        for widget in (self.stroke, self.width_label):
+        for widget in (self.stroke, self.stroke_slider, self.width_label):
             widget.setVisible(tool in ('pencil', 'highlighter', 'shape'))
-        for widget in (self.font_size, self.font_label):
+        for widget in (self.font_size, self.font_slider, self.font_label):
             widget.setVisible(tool == 'text')
         self.color_button.setVisible(tool not in ('eraser', 'crop'))
         self.crop_button.setVisible(tool == 'crop')
@@ -424,6 +481,7 @@ QPushButton#imageTool:checked {{ background: {css(theme.selected)}; border: 2px 
             'eraser': 'Drag over marks to remove them. Erases annotations added during this editing session.',
             'shape': 'Drag to draw the selected shape.', 'text': 'Click the image to add text.',
             'crop': 'Drag around the area to keep, then choose Apply crop. The cropped image will fill the view.'}[tool])
+        self.message.setToolTip(self.message.text())
         self.refresh()
 
     def refresh_color(self):
@@ -467,7 +525,7 @@ QPushButton#imageTool:checked {{ background: {css(theme.selected)}; border: 2px 
         self.scroll.setWidgetResizable(True)
         self.image.setMinimumSize(260, 220)
         self.image.setMaximumSize(16777215, 16777215)
-        self.zoom_label.setText('Fit')
+        self.zoom_label.clear()
 
     def zoom_by(self, factor):
         rect = self.image.image_rect()

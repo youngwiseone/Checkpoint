@@ -70,8 +70,11 @@ class GlassDialog(QDialog):
         layout.addLayout(header)
         return layout
 
-    def showEvent(self, event):
+    def place_on_screen(self):
         center_on_screen(self)
+
+    def showEvent(self, event):
+        self.place_on_screen()
         c = colors.current()
         # Only repolish after an actual theme change.
         if c.name != self._theme:
