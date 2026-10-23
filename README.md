@@ -1,6 +1,8 @@
 # Checkpoint
 
-![Checkpoint — Your next fix starts with F9. Screenshot + note, ready for your AI.](output/marketing/checkpoint-f9-x-2026-10-14.png)
+[![Watch the Checkpoint demo on YouTube](https://img.youtube.com/vi/uFSvx3V0-0w/hqdefault.jpg)](https://youtu.be/uFSvx3V0-0w)
+
+[▶ Watch the Checkpoint demo on YouTube](https://youtu.be/uFSvx3V0-0w)
 
 Capture issues. Turn them into to-dos. Work through them with your assistant.
 
@@ -54,3 +56,5 @@ Work through the tasks with your assistant, check the changes, then mark them **
 ## License
 
 Copyright (C) 2026 Bligh Hedges. [GNU Affero General Public License v3 or later](LICENSE).
+
+![Checkpoint — Your next fix starts with F9. Screenshot + note, ready for your AI.](output/marketing/checkpoint-f9-x-2026-10-14.png)
