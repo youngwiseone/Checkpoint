@@ -10,22 +10,32 @@ import sys
 
 
 def main() -> int:
+    linux = sys.platform.startswith("linux")
+    setup = "setup.sh" if linux else "setup.ps1"
     errors: list[str] = []
     warnings: list[str] = []
     if sys.version_info < (3, 11):
-        errors.append(f"Python 3.11+ is required (found {sys.version.split()[0]}). Install Python 3.11 and re-run setup.ps1.")
+        errors.append(f"Python 3.11+ is required (found {sys.version.split()[0]}). Install Python 3.11 and re-run {setup}.")
     for mod, why in (("sqlalchemy", "database"), ("alembic", "database migrations"),
                      ("PySide6.QtWidgets", "tray icon and note window"), ("mss", "screenshots"), ("PIL", "image encoding")):
         try:
             importlib.import_module(mod)
         except Exception as e:  # noqa: BLE001
-            errors.append(f"Missing {mod} ({why}): {e}. Run setup.ps1 again.")
-    for mod, why in (("pyaudiowpatch", "microphone/computer audio recording"), ("needle", "Whistle local transcription"),
-                     ("keyring", "saving the shared-workspace token")):
+            errors.append(f"Missing {mod} ({why}): {e}. Run {setup} again.")
+    optional = [("needle", "Whistle local transcription"), ("keyring", "saving the shared-workspace token")]
+    if linux:
+        optional += [("checkpoint.audio.pulse", "microphone/computer audio recording")]
+        from .capture import linux as capture_linux
+
+        if capture_linux.use_portal():
+            optional += [("jeepney", "screenshots through the desktop portal")]
+    else:
+        optional += [("pyaudiowpatch", "microphone/computer audio recording")]
+    for mod, why in optional:
         try:
             importlib.import_module(mod)
         except Exception as e:  # noqa: BLE001
-            warnings.append(f"{mod} unavailable — {why} will be disabled ({e.__class__.__name__}).")
+            warnings.append(f"{mod} unavailable — {why} will be disabled ({e.__class__.__name__}: {e}).")
     try:
         from .config import paths
 
@@ -35,8 +45,8 @@ def main() -> int:
         test.unlink()
     except Exception as e:  # noqa: BLE001
         errors.append(f"The data folder isn't writable: {e}")
-    if sys.platform != "win32":
-        errors.append("The desktop app targets Windows. Use `python -m checkpoint.headless` on other systems.")
+    if sys.platform != "win32" and not linux:
+        errors.append("The desktop app targets Windows and Linux. Use `python -m checkpoint.headless` on other systems.")
     for w in warnings:
         print(f"  [warning] {w}")
     for e in errors:

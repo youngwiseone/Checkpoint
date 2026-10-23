@@ -33,6 +33,11 @@ export function fmtBytes(n: number): string {
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
+/** The browser runs on the same machine as the app, so its platform is the app's. */
+export const IS_LINUX = /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent);
+export const START_SCRIPT = IS_LINUX ? "./start.sh" : "start.cmd";
+export const KEYRING_NAME = IS_LINUX ? "your system keyring" : "Windows Credential Manager";
+
 export function isTypingTarget(el: Element | null): boolean {
   if (!el) return false;
   const tag = el.tagName;

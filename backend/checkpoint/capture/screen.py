@@ -1,4 +1,4 @@
-"""Screenshot grabbing with mss.
+"""Screenshot grabbing with mss (or the desktop portal on Wayland, see linux.py).
 
 Only the configured region is captured: the monitor containing the foreground
 window (default), a specific monitor chosen for the session, or the foreground
@@ -12,7 +12,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import win32
+from . import linux, win32
 
 _local = threading.local()
 
@@ -29,7 +29,7 @@ def _mss():
 
 def list_monitors() -> list[dict]:
     try:
-        mons = _mss().monitors[1:]
+        mons = linux.monitors() if linux.use_portal() else _mss().monitors[1:]
     except Exception:  # noqa: BLE001
         return []
     out = []
@@ -38,7 +38,7 @@ def list_monitors() -> list[dict]:
             {
                 "index": i,
                 "id": m.get("unique_id") or f"monitor-{i}",
-                "name": f"Display {i}" + (" (primary)" if m.get("is_primary") else ""),
+                "name": "All displays" if m.get("unique_id") == "desktop" else f"Display {i}" + (" (primary)" if m.get("is_primary") else ""),
                 "left": m["left"],
                 "top": m["top"],
                 "width": m["width"],
@@ -108,6 +108,8 @@ def _grab_image(target: str, region_mode: str):  # noqa: ANN202
     fg = win32.foreground_info()
     region, monitor = resolve_region(target, region_mode, fg)
     monitor = {**monitor, 'focus': focus_coordinates(region, win32.cursor_position())}
+    if linux.use_portal():
+        return linux.grab(region), fg, region, monitor
     shot = _mss().grab(region)
     return Image.frombytes("RGB", shot.size, shot.rgb), fg, region, monitor
 

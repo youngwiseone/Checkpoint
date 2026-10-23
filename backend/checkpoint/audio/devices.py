@@ -1,4 +1,5 @@
-"""WASAPI device discovery (PyAudioWPatch) and the explicit short level test.
+"""WASAPI device discovery (PyAudioWPatch; PulseAudio/PipeWire on Linux, see pulse.py)
+and the explicit short level test.
 
 Devices are referred to by name, not index: PortAudio indices change when devices
 are plugged/unplugged or the process restarts.
@@ -7,6 +8,7 @@ are plugged/unplugged or the process restarts.
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 from typing import Optional
@@ -42,6 +44,10 @@ class ComScope:
 
 
 def _pa_module():
+    if sys.platform.startswith("linux"):
+        from . import pulse
+
+        return pulse
     import pyaudiowpatch as pyaudio  # Windows-only; imported lazily
 
     return pyaudio
@@ -52,7 +58,8 @@ def audio_available() -> tuple[bool, str]:
         _pa_module()
         return True, ""
     except Exception as e:  # noqa: BLE001
-        return False, f"PyAudioWPatch is not available: {e}"
+        lib = "Audio capture" if sys.platform.startswith("linux") else "PyAudioWPatch"
+        return False, f"{lib} is not available: {e}"
 
 
 def list_devices() -> dict:
@@ -195,7 +202,8 @@ class LevelTest:
             if cbs == 0 and kind == "loopback":
                 result = "No sound was playing on this output during the test. That's normal when it's silent — play something and test again."
             elif cbs == 0:
-                result = "The device opened but delivered no audio. It may be disabled, in use exclusively, or blocked by Windows privacy settings."
+                result = "The device opened but delivered no audio. It may be disabled, in use exclusively, or blocked by " + (
+                    "the sound server." if sys.platform.startswith("linux") else "Windows privacy settings.")
             elif peak < 0.003:
                 result = "Receiving audio, but it was silent. Check the device isn't muted."
             else:
