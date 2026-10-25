@@ -163,6 +163,13 @@ class TaskDialog(GlassDialog):
         if not has_image:
             return
         capture = self.captures[self.image_index]
+        self.screenshot.counter.setVisible(not capture.get('media_removed'))
+        if capture.get('media_removed'):
+            from ..services.retention import placeholder_path
+            self.screenshot.load(placeholder_path(self.item['work_status']))
+            self.screenshot.counter.clear()
+            self.edit_image_btn.setEnabled(False)
+            return
         self.screenshot.counter.setText(f'{self.image_index + 1} / {len(self.captures)}' +
             (' · possibly related' if capture['confidence'] != 'direct' else ''))
         self.screenshot.load(capture_path(capture['capture_id']))

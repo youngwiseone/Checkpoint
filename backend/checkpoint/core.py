@@ -85,6 +85,11 @@ class AppCore:
         recover_runs()
         from .services.inbox import reconcile
         reconcile()
+        from .services.retention import cleanup_item_media
+        try:
+            cleanup_item_media()
+        except Exception:
+            log.exception('Attachment cleanup will be retried in the background')
         if workers:
             for w in self._workers():
                 w.start()

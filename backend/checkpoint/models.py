@@ -241,6 +241,7 @@ class Capture(Base):
     needs_context: Mapped[bool] = mapped_column(Boolean, default=False)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # auto screenshots: the remark that triggered it
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    media_removed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
 
 
 class Note(Base):
@@ -304,6 +305,8 @@ class WorkItem(Base):
     conflict_server_copy: Mapped[Any] = mapped_column(JSON, nullable=True)
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    status_changed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    media_removed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     # Agent progress, separate from work status: None (approved, not sent) | sending | sent | working | ready | needs_you
     task_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # T-<n> within its session
     agent_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)

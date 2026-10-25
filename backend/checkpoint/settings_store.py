@@ -106,6 +106,12 @@ class AppearanceSettings(BaseModel):
     theme: Literal["dark", "light"] = "light"
 
 
+class RetentionSettings(BaseModel):
+    # None keeps attachments indefinitely. Text is always retained.
+    deleted_days: int | None = Field(default=1, ge=1, le=3650)
+    done_days: int | None = Field(default=7, ge=1, le=3650)
+
+
 class AppSettings(BaseModel):
     first_run_complete: bool = False
     hotkeys: HotkeySettings = Field(default_factory=HotkeySettings)
@@ -118,6 +124,7 @@ class AppSettings(BaseModel):
     sharing: SharingSettings = Field(default_factory=SharingSettings)
     agents: AgentSettings = Field(default_factory=AgentSettings)
     appearance: AppearanceSettings = Field(default_factory=AppearanceSettings)
+    retention: RetentionSettings = Field(default_factory=RetentionSettings)
     last_project_id: Optional[str] = None
     version: int = SETTINGS_VERSION
 

@@ -44,6 +44,8 @@ Type a note or click **Dictate note**, then **Save**. For voice notes, enable yo
 - Drag **up** to mark Done or **down** to delete. **Undo** restores the change.
 - **Shift** selects a range; **Ctrl-click** adds or removes individual tasks.
 
+Checkpoint keeps item text and transcripts. By default it removes images and audio **1 day after deletion** or **7 days after Done / archived**, replacing the image with a red or green glass placeholder. Change either period (or choose **Keep forever**) in **Settings → Storage**. Cleanup runs at startup on existing items and hourly while the app is open. Reopening an item before cleanup keeps its attachments; Undo after cleanup restores the text-only item. Attachments still used by another retained item are kept until that item is eligible too.
+
 For continuous recording, configure audio in **Settings → Audio** and use the record button beside Settings. Right-click it to open transcripts.
 
 ## Work through your tasks

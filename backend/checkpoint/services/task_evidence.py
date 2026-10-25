@@ -38,7 +38,7 @@ def last_editor_payload(project_id):
         return None
     from .review import get_work_item
     item = get_work_item(iid)
-    captures = [e for e in item['evidence'] if e['kind'] == 'capture']
+    captures = [e for e in item['evidence'] if e['kind'] == 'capture' and not e.get('media_removed')]
     if captures:
         return capture_editor_payload(captures[-1]['capture_id'])
     return {'item_id': iid, 'project_id': project_id, 'text': item['description'],
@@ -48,7 +48,7 @@ def last_editor_payload(project_id):
 def attach_capture(item_id, capture_id):
     with write_session() as s:
         w, c = s.get(WorkItem, item_id), s.get(Capture, capture_id)
-        if not w or not c or w.project_id != c.project_id or c.status == 'discarded':
+        if not w or not c or w.project_id != c.project_id or c.status == 'discarded' or c.media_removed_at:
             raise ValueError('Choose a screenshot from the same project.')
         existing = s.scalars(select(EvidenceLink).where(EvidenceLink.capture_id == c.id,
             EvidenceLink.work_item_id.is_not(None))).all()
@@ -57,6 +57,8 @@ def attach_capture(item_id, capture_id):
         if not existing:
             s.add(EvidenceLink(work_item_id=w.id, capture_id=c.id, confidence='direct', attached_by='user'))
         c.status = 'saved'
+        # New evidence can be added to a text-only task after it is reopened.
+        w.media_removed_at = None
         w.version += 1
         w.human_updated_at = utcnow()
     hooks.emit_state()
@@ -122,6 +124,7 @@ def bundle(item_id, target_id):
         for d in s.scalars(select(DraftItem).where(DraftItem.work_item_id == source.id)).all():
             d.work_item_id = target.id
         source.work_status, source.feedback_reason, source.duplicate_of_id = 'deleted', 'duplicate', target.id
+        source.status_changed_at = utcnow()
         source.version += 1
         target.version += 1
         target.human_updated_at = utcnow()

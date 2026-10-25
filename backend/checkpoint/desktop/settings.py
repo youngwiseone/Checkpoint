@@ -2,7 +2,7 @@
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialogButtonBox,
                               QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-                              QPushButton, QTabWidget, QWidget)
+                              QPushButton, QSpinBox, QTabWidget, QWidget)
 from sqlalchemy import select
 
 from ..db import read_session, write_session
@@ -132,6 +132,7 @@ class SettingsDialog(GlassDialog):
         chat.addRow(text)
 
         storage = tab("Storage")
+        storage.setVerticalSpacing(12)
         from ..config import paths
         folder = QLineEdit(str(paths().root))
         folder.setReadOnly(True)
@@ -140,6 +141,23 @@ class SettingsDialog(GlassDialog):
         storage_hint.setObjectName('muted')
         storage_hint.setWordWrap(True)
         storage.addRow(storage_hint)
+        self.deleted_days = QSpinBox()
+        self.done_days = QSpinBox()
+        for box, value in ((self.deleted_days, st.retention.deleted_days), (self.done_days, st.retention.done_days)):
+            box.setRange(0, 3650)
+            box.setSpecialValueText('Keep forever')
+            box.setSuffix(' days')
+            box.setValue(value or 0)
+            box.valueChanged.connect(lambda days, field=box: field.setSuffix(' day' if days == 1 else ' days'))
+            box.setSuffix(' day' if value == 1 else ' days')
+        storage.addRow('Deleted attachments', self.deleted_days)
+        storage.addRow('Done / archived attachments', self.done_days)
+        retention_hint = QLabel('Keep text and transcripts. Remove images and audio after this many days; 0 keeps them forever. '
+                               'Runs at startup on older items and hourly. Undo cannot restore removed attachments.')
+        retention_hint.setObjectName('muted')
+        retention_hint.setWordWrap(True)
+        retention_hint.setMinimumHeight(60)
+        storage.addRow(retention_hint)
         choose = QPushButton("Choose data folder for next launch")
         choose.clicked.connect(self._storage)
         storage.addRow(choose)
@@ -227,6 +245,8 @@ class SettingsDialog(GlassDialog):
             update_settings({"last_project_id": self.project.currentData(), "first_run_complete": True,
                              "hotkeys": {"capture": capture, "review": review},
                              "capture": {"region": self.region.currentData()},
+                             "retention": {"deleted_days": self.deleted_days.value() or None,
+                                           "done_days": self.done_days.value() or None},
                              "audio": {"mic_enabled": self.mic.isChecked(), "mic_device": self.mic_device.currentData(),
                                        "loopback_enabled": self.loopback.isChecked(), "loopback_device": self.loop_device.currentData()},
                              "transcription": {"model": self.model.currentData(), "device": "cpu",

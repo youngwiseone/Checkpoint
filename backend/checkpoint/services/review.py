@@ -51,6 +51,10 @@ def evidence_payload(s, links: Iterable[EvidenceLink]) -> list[dict]:  # noqa: A
                         "thumb_url": f"/api/media/captures/{c.id}/thumb?v={c.sha256}", "image_url": f"/api/media/captures/{c.id}/image?v={c.sha256}",
                         "window_title": c.window_title, "width": c.width, "height": c.height, "reason": c.reason,
                         "focus": None if (c.monitor or {}).get('cropped') else (c.monitor or {}).get('focus')})
+            if c.media_removed_at:
+                from .retention import placeholder_url
+                out[-1].update(image_url=placeholder_url('done'), thumb_url=placeholder_url('done'),
+                               media_removed=True, focus=None)
         elif link.segment_id:
             seg = s.get(TranscriptSegment, link.segment_id)
             if seg is None:
@@ -110,6 +114,7 @@ def work_item_dict(s, w: WorkItem, with_evidence: bool = False) -> dict:  # noqa
         "conflict_server_copy": w.conflict_server_copy, "shared_attachment_ids": w.shared_attachment_ids or [],
         "shared_excerpts": w.shared_excerpts, "last_synced_at": _iso(w.last_synced_at),
         "completed_at": _iso(w.completed_at), "created_at": _iso(w.created_at), "updated_at": _iso(w.updated_at),
+        "status_changed_at": _iso(w.status_changed_at), "media_removed_at": _iso(w.media_removed_at),
     }
     if w.session_id:
         sess = s.get(Session, w.session_id)
@@ -126,9 +131,20 @@ def work_item_dict(s, w: WorkItem, with_evidence: bool = False) -> dict:  # noqa
                 {"id": a, "url": f"/api/share/attachments/{a}"} for a in (w.shared_attachment_ids or [])
             ]
     else:
-        first = next((l for l in links if l.capture_id), None)
-        capture = s.get(Capture, first.capture_id) if first else None
+        captures = [s.get(Capture, link.capture_id) for link in links if link.capture_id]
+        capture = next((c for c in captures if c and not c.media_removed_at), None)
         out["thumb_url"] = f"/api/media/captures/{capture.id}/thumb?v={capture.sha256}" if capture else None
+    if w.media_removed_at:
+        from .retention import placeholder_url
+        url = placeholder_url(w.work_status)
+        out['thumb_url'] = url
+        for e in out.get('evidence', []):
+            if e['kind'] == 'capture':
+                e.update(image_url=url, thumb_url=url, media_removed=True, focus=None)
+            else:
+                e['audio_url'] = None
+        for attachment in out.get('remote_attachments', []):
+            attachment['url'] = url
     return out
 
 
@@ -482,7 +498,9 @@ def _apply_work_patch(s, w, patch, who):
         if k == "work_status":
             if v not in WORK_STATUSES:
                 raise ReviewError("Unknown status")
-            w.completed_at = utcnow() if v == "done" else None
+            if v != w.work_status:
+                w.status_changed_at = utcnow()
+                w.completed_at = w.status_changed_at if v == "done" else None
         if k == "title":
             v = (v or "").strip()[:300]
             if not v:
@@ -604,6 +622,7 @@ def set_checklist_state(entry_id: str, state: str) -> dict:
                 new_status = "done" if state == "done" else ("open" if w.work_status == "done" else w.work_status)
                 if new_status != w.work_status:
                     w.work_status = new_status
+                    w.status_changed_at = utcnow()
                     w.completed_at = e.completed_at
                     _bump_work_item(s, w)
         s.flush()

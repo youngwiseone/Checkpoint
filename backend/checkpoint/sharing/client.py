@@ -198,6 +198,8 @@ def item_payload(s, w: WorkItem, attachment_ids: Optional[list[str]] = None, wit
 
 
 def apply_server_item(w: WorkItem, data: dict) -> None:
+    if data.get('work_status') != w.work_status:
+        w.status_changed_at = utcnow()
     for k in ("type", "title", "description", "work_status", "assignee", "priority"):
         setattr(w, k, data.get(k))
     w.tags = data.get("tags") or []
@@ -336,7 +338,15 @@ def cached_attachment(aid: str) -> tuple[bytes, str]:
 
     aid = str(_uuid.UUID(aid))
     with read_session() as s:
+        owners = s.scalars(select(WorkItem)).all()
+        linked = [w for w in owners if aid in (w.shared_attachment_ids or [])]
+        if linked and all(w.media_removed_at for w in linked):
+            from ..services.retention import placeholder_path
+            return placeholder_path(linked[0].work_status).read_bytes(), 'image/png'
         c = s.get(Capture, aid)
+        if c is not None and c.media_removed_at:
+            from ..services.retention import placeholder_path
+            return placeholder_path('done').read_bytes(), 'image/png'
         if c is not None and media_path(c.image_rel_path).is_file():
             return media_path(c.image_rel_path).read_bytes(), "image/png"
     p = shared_cache_path(aid)

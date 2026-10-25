@@ -1,4 +1,5 @@
 """One inbox, with speech attached to manual captures as it arrives."""
+import time
 from sqlalchemy import func, select
 
 from ..db import read_session, write_session
@@ -74,6 +75,7 @@ class InboxWorker(Worker):
     def __init__(self):
         super().__init__()
         self.last_signature = None
+        self.last_retention_check = None
 
     def step(self) -> bool:
         from .automatic import settle
@@ -87,6 +89,10 @@ class InboxWorker(Worker):
         if signature != self.last_signature:
             reconcile()
             self.last_signature = signature
+        if self.last_retention_check is None or time.monotonic() - self.last_retention_check >= 3600:
+            from .retention import cleanup_item_media
+            cleanup_item_media()
+            self.last_retention_check = time.monotonic()
         from .image_cards import refresh
         refresh()
         return False

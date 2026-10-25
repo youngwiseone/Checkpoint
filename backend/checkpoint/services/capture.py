@@ -231,6 +231,7 @@ class CaptureService:
                 if attach_to:
                     s.flush()
                     s.add(EvidenceLink(work_item_id=attach_to, capture_id=cid, confidence='direct', attached_by='user'))
+                    item.media_removed_at = None
                     item.version += 1
                     item.human_updated_at = datetime.now(timezone.utc)
         except Exception:

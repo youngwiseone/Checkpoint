@@ -160,6 +160,7 @@ export interface SessionDetail extends SessionSummary {
 }
 
 export interface Evidence {
+  media_removed?: boolean;
   id: string;
   kind: "capture" | "segment" | "note";
   confidence: "direct" | "candidate" | "uncertain";
@@ -235,6 +236,8 @@ export interface WorkItem {
   shared_excerpts: boolean;
   last_synced_at: string | null;
   completed_at: string | null;
+  status_changed_at?: string | null;
+  media_removed_at?: string | null;
   created_at: string;
   updated_at: string;
   capture_count: number;
@@ -314,6 +317,7 @@ export interface AudioDevices {
 }
 
 export interface Settings {
+  retention: { deleted_days: number | null; done_days: number | null };
   first_run_complete: boolean;
   hotkeys: { capture: string; capture_context: string; quick_note: string; start_session: string; review: string; switch_project: string };
   capture: { always_ask_context: boolean; region: "foreground_monitor" | "foreground_window"; debounce_ms: number };

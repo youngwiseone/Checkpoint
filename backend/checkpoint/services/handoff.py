@@ -188,7 +188,7 @@ def _ai_image(capture_id: str, folder: Path) -> Optional[Path]:
 
     with read_session() as s:
         c = s.get(Capture, capture_id)
-        if c is None:
+        if c is None or c.media_removed_at:
             return None
         src = media_path(c.image_rel_path)
     if not src.is_file():
@@ -251,6 +251,8 @@ def build(item_ids: list[str], include_screenshots: bool, include_excerpts: bool
     omitted = 0
     if include_screenshots:
         for it in items:
+            if it.get('media_removed_at'):
+                continue
             for sc in it["screenshots"]:
                 if sc["id"] in images:
                     continue

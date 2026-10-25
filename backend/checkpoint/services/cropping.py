@@ -23,7 +23,7 @@ def save_image(capture_id: str, png: bytes, *, expected_sha: str, cropped: bool 
     """
     with write_session() as s:
         c = s.get(Capture, capture_id)
-        if c is None or c.status == "discarded":
+        if c is None or c.status == "discarded" or c.media_removed_at:
             raise ValueError("Screenshot not found")
         if c.sha256 != expected_sha:
             raise ValueError("Screenshot changed elsewhere. Reopen the editor to load the latest image.")
@@ -67,7 +67,7 @@ def _store(s, c, image, *, cropped=False, restored=False):
 def crop(capture_id: str, box: tuple[int, int, int, int] | None, *, highlight: bool = False) -> dict:
     with write_session() as s:
         c = s.get(Capture, capture_id)
-        if c is None or c.status == "discarded":
+        if c is None or c.status == "discarded" or c.media_removed_at:
             raise ValueError("Screenshot not found")
         current = media_path(c.image_rel_path)
         original = original_path(c)

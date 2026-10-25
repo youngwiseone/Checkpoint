@@ -53,7 +53,7 @@ function ItemDrawer({ id, onClose, previous, next }: { id: string; onClose: () =
               <figcaption className="row wrap small muted">
                 <span>{fmtOffset(capture.offset_ms)}{capture.confidence !== "direct" ? " · possibly related" : ""}</span>
                 <span className="spacer" />
-                {capture.capture_id && <button className="btn sm" onClick={() => setCropId(capture.capture_id!)}><Crop size={14} /> Edit screenshot</button>}
+                {capture.capture_id && !capture.media_removed && <button className="btn sm" onClick={() => setCropId(capture.capture_id!)}><Crop size={14} /> Edit screenshot</button>}
               </figcaption>
               {captures.length > 1 && <div className="review-strip">{captures.map((c, index) => <button key={c.id} className={`btn ${index === frameIndex ? "primary" : ""}`} aria-label={`Screenshot ${index + 1}`} aria-pressed={index === frameIndex} onClick={() => setFrameIndex(index)}><img src={c.thumb_url ?? c.image_url} alt={`Screenshot ${index + 1}`} /></button>)}</div>}
             </figure>}

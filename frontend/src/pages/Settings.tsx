@@ -119,6 +119,8 @@ function Transcription({ s }: { s: Settings }) {
 }
 
 function Storage({ s }: { s: Settings }) {
+  const patch = usePatch();
+  const [retention, setRetention] = useState(s.retention);
   const q = useQuery({ queryKey: ["storage"], queryFn: () => api.get<Record<string, number | string>>("/api/storage") });
   const [dir, setDir] = useState("");
   const toast = useToast();
@@ -133,6 +135,21 @@ function Storage({ s }: { s: Settings }) {
           <table className="table"><tbody>{rows.map(([k, l]) => <tr key={k}><td>{l}</td><td className="mono">{fmtBytes(Number(q.data![k] ?? 0))}</td></tr>)}</tbody></table>
         )}
         <p className="hint">Delete raw audio or whole sessions from each session's page. Approved items are always kept.</p>
+      </div>
+      <div className="card stack">
+        <h3>Attachment cleanup</h3>
+        <p className="hint">Remove images and audio after an item has been deleted or done for this many days. Notes and transcripts stay. Cleanup runs at startup, including older items, and hourly while Checkpoint is open. Removed attachments cannot be restored by Undo.</p>
+        <div className="grid-2">
+          {([['deleted_days', 'Deleted attachments'], ['done_days', 'Done / archived attachments']] as const).map(([key, label]) => (
+            <div className="field" key={key}>
+              <label htmlFor={key}>{label} (days)</label>
+              <input id={key} className="input" type="number" min={0} max={3650} step={1} value={retention[key] ?? 0}
+                onChange={(e) => setRetention({ ...retention, [key]: Number(e.target.value) || null })} />
+              <span className="hint">0 keeps attachments forever.</span>
+            </div>
+          ))}
+        </div>
+        <div><button className="btn primary" disabled={patch.isPending} onClick={() => patch.mutate({ retention })}>Save cleanup settings</button></div>
       </div>
       <div className="card stack">
         <h3>Move data folder</h3>

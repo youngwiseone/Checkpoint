@@ -620,7 +620,10 @@ class InboxPanel(QFrame):
         self.timer.start()
 
     def _pixmap(self, item):
-        evidence = next((e for e in item.get('evidence', []) if e['kind'] == 'capture'), None)
+        if item.get('media_removed_at'):
+            from ..services.retention import placeholder_path
+            return QPixmap(str(placeholder_path(item['work_status'])))
+        evidence = next((e for e in item.get('evidence', []) if e['kind'] == 'capture' and not e.get('media_removed')), None)
         if not evidence:
             return QPixmap()
         cid = evidence['capture_id']

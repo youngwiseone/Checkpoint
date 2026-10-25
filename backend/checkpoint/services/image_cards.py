@@ -121,7 +121,9 @@ def render_cards(item: dict, screenshot: Path | None = None, caption: str = '', 
         if source is None:
             continue
         with Image.open(source) as original:
-            shot = original.convert('RGB')
+            shot = Image.new('RGB', original.size, '#f6f7fa')
+            rgba = original.convert('RGBA')
+            shot.paste(rgba, mask=rgba.getchannel('A'))
         prepared.append((shot, label))
     width = max([WIDTH] + [shot.width for shot, _ in prepared])
     lines = _wrap(text, font, width - 80)
@@ -151,6 +153,9 @@ def render_cards(item: dict, screenshot: Path | None = None, caption: str = '', 
 
 def _sources(item: dict, include_screenshots: bool):
     sources = []
+    if include_screenshots and item.get('media_removed_at'):
+        from .retention import placeholder_path
+        return [(placeholder_path(item['work_status']), '', '')]
     if include_screenshots:
         with read_session() as session:
             for sc in item.get('screenshots', []):

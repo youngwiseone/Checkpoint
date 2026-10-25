@@ -22,6 +22,7 @@ from ..models import (
     AudioSource,
     Capture,
     DraftItem,
+    EvidenceLink,
     Note,
     ProcessingRun,
     Project,
@@ -751,6 +752,14 @@ def reset_crop(cid: str) -> dict:
         raise _bad(e) from e
 
 
+@router.get('/media/retention/{status}')
+def retention_placeholder(status: str) -> FileResponse:
+    if status not in ('done', 'deleted'):
+        raise HTTPException(404)
+    from ..services.retention import placeholder_path
+    return FileResponse(placeholder_path(status), media_type='image/png')
+
+
 @router.get("/media/captures/{cid}/{variant}")
 def media(cid: str, variant: str) -> FileResponse:
     if variant not in ("image", "thumb", "original"):
@@ -759,6 +768,12 @@ def media(cid: str, variant: str) -> FileResponse:
         c = s.get(Capture, cid)
         if c is None:
             raise HTTPException(404, "Not found")
+        if c.media_removed_at:
+            from ..services.retention import placeholder_path
+            statuses = s.scalars(select(WorkItem.work_status).join(EvidenceLink, EvidenceLink.work_item_id == WorkItem.id)
+                                 .where(EvidenceLink.capture_id == c.id)).all()
+            status = 'deleted' if statuses and all(status == 'deleted' for status in statuses) else 'done'
+            return FileResponse(placeholder_path(status), media_type='image/png')
         rel = c.thumb_rel_path if variant == "thumb" else c.image_rel_path
         if variant == "original":
             from ..services.cropping import original_path

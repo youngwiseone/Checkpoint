@@ -107,6 +107,8 @@ def export(item_ids: list[str], fmt: str, include_screenshots: bool = True, incl
                             c = s.get(Capture, sc["id"])
                             if c is None:
                                 continue
+                            if it.get('media_removed_at') or c.media_removed_at:
+                                continue
                             p = media_path(c.image_rel_path)
                             if p.is_file():
                                 rel = f"attachments/{c.id}.png"
