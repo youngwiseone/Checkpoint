@@ -52,6 +52,7 @@ class DesktopHooks:
         self.request_quick_note: Optional[Callable[[dict], None]] = None  # F9 text-only
         self.toast: Optional[Callable[..., None]] = None  # (level, message, work_rect) non-focus-stealing
         self.state_changed: Optional[Callable[[], None]] = None
+        self.task_ready: Optional[Callable[[str], None]] = None  # completed capture or content edit
         self.note_window_open: Callable[[], bool] = lambda: False
         self.hotkey_status: Callable[[], dict] = lambda: {"available": False, "reason": "Desktop host not running"}
         self.rebind_hotkeys: Optional[Callable[[], dict]] = None
@@ -80,6 +81,13 @@ class DesktopHooks:
             try:
                 self.state_changed()
             except Exception:  # noqa: BLE001
+                pass
+
+    def emit_task_ready(self, item_id: str) -> None:
+        if self.task_ready:
+            try:
+                self.task_ready(item_id)
+            except Exception:  # noqa: BLE001 - clipboard failure must never break saving
                 pass
 
 

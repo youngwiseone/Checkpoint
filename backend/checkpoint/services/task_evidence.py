@@ -62,6 +62,7 @@ def attach_capture(item_id, capture_id):
         w.version += 1
         w.human_updated_at = utcnow()
     hooks.emit_state()
+    hooks.emit_task_ready(item_id)
 
 
 def detach_capture(item_id, capture_id):
@@ -87,6 +88,7 @@ def detach_capture(item_id, capture_id):
         w.version += 1
         w.human_updated_at = utcnow()
     hooks.emit_state()
+    hooks.emit_task_ready(item_id)
 
 
 def bundle_previous(item_id):
@@ -129,6 +131,7 @@ def bundle(item_id, target_id):
         target.version += 1
         target.human_updated_at = utcnow()
     hooks.emit_state()
+    hooks.emit_task_ready(target_id)
     return target_id
 
 

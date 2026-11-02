@@ -529,6 +529,7 @@ def update_work_items(changes: Iterable[tuple[str, dict[str, Any], Optional[int]
     who = get_settings().sharing.display_name or None
     with write_session() as s:
         items = []
+        content_changed = []
         for item_id, patch, expected_version in changes:
             item = s.get(WorkItem, item_id)
             if item is None:
@@ -537,9 +538,15 @@ def update_work_items(changes: Iterable[tuple[str, dict[str, Any], Optional[int]
                 raise ReviewError("This item changed elsewhere. Reload to see the latest version.")
             items.append((item, patch))
         for item, patch in items:
+            if any(key in patch and getattr(item, key) != patch[key]
+                   for key in ('title', 'description', 'type')):
+                content_changed.append(item.id)
             _apply_work_patch(s, item, patch, who)
         s.flush()
-        return [work_item_dict(s, item, with_evidence=with_evidence) for item, _ in items]
+        result = [work_item_dict(s, item, with_evidence=with_evidence) for item, _ in items]
+    for item_id in content_changed:
+        hooks.emit_task_ready(item_id)
+    return result
 
 
 def update_work_item(item_id: str, patch: dict[str, Any], expected_version: Optional[int] = None) -> dict:

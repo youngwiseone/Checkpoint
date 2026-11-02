@@ -24,6 +24,7 @@ class HotkeySettings(BaseModel):
 
 class CaptureSettings(BaseModel):
     always_ask_context: bool = False
+    auto_copy_latest: bool = True
     # foreground_monitor: monitor containing the foreground window (default)
     # foreground_window: just the visible foreground window rectangle
     region: Literal["foreground_monitor", "foreground_window"] = "foreground_monitor"

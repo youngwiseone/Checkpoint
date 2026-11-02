@@ -3,6 +3,7 @@ import time
 from sqlalchemy import func, select
 
 from ..db import read_session, write_session
+from ..events import hooks
 from ..models import Capture, DraftItem, EvidenceLink, TranscriptSegment, WorkItem
 from ..workers import Worker
 from .capture import guess_type, provisional_title
@@ -10,6 +11,7 @@ from .review import approve
 
 
 def reconcile() -> None:
+    changed = set()
     # Retain the old draft records as evidence/history, without a separate approval step.
     with read_session() as s:
         pending = list(s.scalars(select(DraftItem.id).where(
@@ -42,10 +44,23 @@ def reconcile() -> None:
                     existing.add(seg.id)
                     added = True
             # Never overwrite a title/note the user has edited. Speech remains available as evidence.
+            if added:
+                changed.add(w.id)
             if added and w.title.startswith("Screenshot · ") and not w.description and not w.description_edited:
                 said = " ".join((g.corrected_text or g.text).strip() for g in segments)
                 w.title, w.description, w.type = provisional_title(said), said, guess_type(said)
                 w.version += 1
+    for item_id in changed:
+        hooks.emit_task_ready(item_id)
+
+
+def capture_ready(capture_id: str) -> None:
+    """Notify only after image/evidence transactions have committed."""
+    with read_session() as s:
+        ids = s.scalars(select(EvidenceLink.work_item_id).where(
+            EvidenceLink.capture_id == capture_id, EvidenceLink.work_item_id.is_not(None))).all()
+    for item_id in ids:
+        hooks.emit_task_ready(item_id)
 
 
 def ensure_capture(capture_id: str) -> str:

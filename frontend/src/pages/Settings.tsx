@@ -61,6 +61,8 @@ function Shortcuts({ s }: { s: Settings }) {
       <div className="card stack">
         <h3>Capture behaviour</h3>
         <p className="hint">Tap capture for a screenshot, double tap to edit the last task, hold to review, or tap, release, then hold to dictate. The review key is optional; leave it empty to use one key.</p>
+        <Toggle checked={s.capture.auto_copy_latest} onChange={(v) => patch.mutate({ capture: { auto_copy_latest: v } })}
+          label="Automatically copy latest task to clipboard" hint="Copy the complete task image after capture or voice processing, and refresh it after saved edits." />
         <div className="field" style={{ maxWidth: 420 }}>
           <label htmlFor="region">Screenshot area</label>
           <select id="region" className="select" value={s.capture.region} onChange={(e) => patch.mutate({ capture: { region: e.target.value } })}>

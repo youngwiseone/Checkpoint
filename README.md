@@ -51,6 +51,7 @@ For continuous recording, configure audio in **Settings → Audio** and use the 
 ## Work through your tasks
 
 - **Copy images:** Click the **copy button** beside the pencil, then paste into your chat. It copies all selected tasks, including their screenshots and notes.
+- **Paste the latest task:** After saving a capture or processing its voice note, Checkpoint automatically adds the complete task image to your clipboard and shows **Added task to clipboard**. Paste straight into Codex or another chat. Saving text or image edits to the latest task refreshes the clipboard too. This is on by default; turn it off or on in **Settings → General → Automatically copy latest task to clipboard**. The menu copy button still copies one task or your whole selection.
 - **Connect directly:** Connect Codex or Claude Desktop in **Settings → Chat**, restart that app, then ask: “List my open Checkpoint tasks.”
 
 Work through the tasks with your assistant, check the changes, then mark them **Done** in Checkpoint. The direct connection is read-only.

@@ -165,6 +165,8 @@ class CaptureService:
             hooks.emit_toast("success" if not g.warnings else "warning",
                              g.warnings[0] if g.warnings else f"Screenshot saved at {label}{hint}", g.work_rect)
         hooks.emit_state()
+        if not needs_note and not quiet:
+            hooks.emit_task_ready(ensure_capture(cap['id']))
         return payload
 
     def auto_capture(self, frame, reason: str = "") -> Optional[dict]:  # noqa: ANN001
@@ -238,6 +240,8 @@ class CaptureService:
             media_path(img_rel).unlink(missing_ok=True)
             media_path(thumb_rel).unlink(missing_ok=True)
             raise
+        if attach_to:
+            hooks.emit_task_ready(attach_to)
         return cid
 
     # ------------------------------------------------------------ notes
@@ -268,25 +272,27 @@ class CaptureService:
                 w.description_edited = True
                 s.add(EvidenceLink(work_item_id=w.id, note_id=note.id, confidence="direct", attached_by="user"))
                 cap.status, cap.needs_context = "saved", False
-                return {"work_item_id": w.id, "note_id": note.id}
-            w = WorkItem(project_id=cap.project_id, session_id=cap.session_id,
-                         type=category or guess_type(text), title=provisional_title(text),
-                         description=text, description_edited=True, work_status="open",
-                         human_updated_at=datetime.now(timezone.utc))
-            s.add(w)
-            s.flush()
-            s.add(EvidenceLink(work_item_id=w.id, capture_id=cap.id, confidence="direct", attached_by="user"))
-            s.add(EvidenceLink(work_item_id=w.id, note_id=note.id, confidence="direct", attached_by="user"))
-            cap.status, cap.needs_context = "saved", False
-            draft = DraftItem(project_id=cap.project_id, session_id=cap.session_id, origin="typed",
-                              type=w.type, title=w.title, description=text,
-                              review_state="approved", work_item_id=w.id)
-            s.add(draft)
-            s.flush()
-            s.add(EvidenceLink(draft_id=draft.id, capture_id=cap.id, confidence="direct", attached_by="user"))
-            s.add(EvidenceLink(draft_id=draft.id, note_id=note.id, confidence="direct", attached_by="user"))
-            result = {"work_item_id": w.id, "note_id": note.id, "draft_id": draft.id}
+                result = {"work_item_id": w.id, "note_id": note.id}
+            else:
+                w = WorkItem(project_id=cap.project_id, session_id=cap.session_id,
+                             type=category or guess_type(text), title=provisional_title(text),
+                             description=text, description_edited=True, work_status="open",
+                             human_updated_at=datetime.now(timezone.utc))
+                s.add(w)
+                s.flush()
+                s.add(EvidenceLink(work_item_id=w.id, capture_id=cap.id, confidence="direct", attached_by="user"))
+                s.add(EvidenceLink(work_item_id=w.id, note_id=note.id, confidence="direct", attached_by="user"))
+                cap.status, cap.needs_context = "saved", False
+                draft = DraftItem(project_id=cap.project_id, session_id=cap.session_id, origin="typed",
+                                  type=w.type, title=w.title, description=text,
+                                  review_state="approved", work_item_id=w.id)
+                s.add(draft)
+                s.flush()
+                s.add(EvidenceLink(draft_id=draft.id, capture_id=cap.id, confidence="direct", attached_by="user"))
+                s.add(EvidenceLink(draft_id=draft.id, note_id=note.id, confidence="direct", attached_by="user"))
+                result = {"work_item_id": w.id, "note_id": note.id, "draft_id": draft.id}
         hooks.emit_state()
+        hooks.emit_task_ready(result['work_item_id'])
         return result
 
     def quick_note(self, text: str, category: Optional[str] = None, *, mono: Optional[float] = None,
@@ -315,6 +321,7 @@ class CaptureService:
         from .review import approve
         result["work_item_id"] = approve([result["draft_id"]])[0]["work_item_id"]
         hooks.emit_state()
+        hooks.emit_task_ready(result['work_item_id'])
         return result
 
     def keep_unfinished(self, capture_id: str) -> None:
@@ -324,6 +331,8 @@ class CaptureService:
             if cap and cap.status == "unfinished":
                 cap.needs_context = True
         hooks.emit_state()
+        from .inbox import capture_ready
+        capture_ready(capture_id)
 
     def discard(self, capture_id: str) -> None:
         with write_session() as s:

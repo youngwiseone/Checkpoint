@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import select
 
 from ..db import read_session, write_session
+from ..events import hooks
 from ..models import AudioChunk, AudioSource, Capture, EvidenceLink, Session, TranscriptionJob, TranscriptSegment, WorkItem, utcnow
 from ..settings_store import get_settings
 from ..workers import HEAVY_LOCK
@@ -124,3 +125,5 @@ def settle():
                     s.add(EvidenceLink(work_item_id=w.id, segment_id=seg.id, confidence='direct', attached_by='system'))
             cap.status = 'saved'
             w.version += 1
+            item_id = w.id
+        hooks.emit_task_ready(item_id)

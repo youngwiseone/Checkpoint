@@ -68,6 +68,10 @@ class SettingsDialog(GlassDialog):
         general.addRow(hint)
         self.region = combo([("Active display", "foreground_monitor"), ("Active window", "foreground_window")], st.capture.region)
         general.addRow("Screenshot area", self.region)
+        self.auto_copy_latest = QCheckBox("Automatically copy latest task to clipboard")
+        self.auto_copy_latest.setChecked(st.capture.auto_copy_latest)
+        self.auto_copy_latest.setToolTip("Copy the complete task image after capture or voice processing, and refresh it after saved edits.")
+        general.addRow(self.auto_copy_latest)
 
         audio = tab("Audio")
         from ..audio.devices import list_devices
@@ -244,7 +248,8 @@ class SettingsDialog(GlassDialog):
                 raise ValueError("Capture and review must use different keys. Leave review empty to use only one key.")
             update_settings({"last_project_id": self.project.currentData(), "first_run_complete": True,
                              "hotkeys": {"capture": capture, "review": review},
-                             "capture": {"region": self.region.currentData()},
+                             "capture": {"region": self.region.currentData(),
+                                         "auto_copy_latest": self.auto_copy_latest.isChecked()},
                              "retention": {"deleted_days": self.deleted_days.value() or None,
                                            "done_days": self.done_days.value() or None},
                              "audio": {"mic_enabled": self.mic.isChecked(), "mic_device": self.mic_device.currentData(),

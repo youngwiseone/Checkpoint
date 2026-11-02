@@ -30,7 +30,10 @@ def save_image(capture_id: str, png: bytes, *, expected_sha: str, cropped: bool 
         with Image.open(io.BytesIO(png)) as image:
             image.load()
             image = image.convert("RGB")
-            return _store(s, c, image, cropped=cropped, restored=restored)
+            result = _store(s, c, image, cropped=cropped, restored=restored)
+    from .inbox import capture_ready
+    capture_ready(capture_id)
+    return result
 
 
 def _store(s, c, image, *, cropped=False, restored=False):
@@ -85,5 +88,8 @@ def crop(capture_id: str, box: tuple[int, int, int, int] | None, *, highlight: b
                 else:
                     image = image.crop((x, y, x + width, y + height))
             image = image.convert("RGB")
-            return _store(s, c, image, cropped=not highlight and box is not None,
-                          restored=not highlight and box is None)
+            result = _store(s, c, image, cropped=not highlight and box is not None,
+                            restored=not highlight and box is None)
+    from .inbox import capture_ready
+    capture_ready(capture_id)
+    return result

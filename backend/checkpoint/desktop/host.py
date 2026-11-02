@@ -41,6 +41,7 @@ class Bridge(QObject):
     review_requested = Signal(dict)
     held_note = Signal(object)
     setup_requested = Signal(str)
+    task_ready = Signal(str)
 
 
 class DesktopHost:
@@ -52,6 +53,9 @@ class DesktopHost:
         self.show_panel = show_panel
         self.core = get_core()
         self.bridge = Bridge()
+        from .clipboard import AutomaticTaskClipboard
+        self.task_clipboard = AutomaticTaskClipboard(self.bridge)
+        self.bridge.task_ready.connect(self.task_clipboard.request)
         self.note_window = NoteWindow(self._save_note, self._keep_capture, self._discard_capture, self._menu_from_note)
         self.toast = Toast()
         self.overlay = InboxPanel(open_settings=self.open_settings, recording=self._record_from_panel,
@@ -105,6 +109,7 @@ class DesktopHost:
         hooks.request_note = lambda payload: self.bridge.note_requested.emit(payload)
         hooks.toast = lambda level, msg, work=None: self.bridge.toast_requested.emit(level, msg, work)
         hooks.state_changed = lambda: self.bridge.state_changed.emit()
+        hooks.task_ready = self.bridge.task_ready.emit
         hooks.note_window_open = lambda: self.note_window.isVisible()
         hooks.hotkey_status = lambda: self.hotkeys.summary() if self.hotkeys else {"ok": False, "reason": "Hotkeys unavailable"}
         hooks.rebind_hotkeys = self._rebind
@@ -529,6 +534,8 @@ class DesktopHost:
         self.app.quit()
 
     def shutdown(self) -> None:
+        hooks.task_ready = None
+        self.task_clipboard.stop()
         self.capture_button.clear()
         self.held_timer.stop()
         if self._press_recording:
