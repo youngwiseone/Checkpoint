@@ -31,13 +31,15 @@ Next time, just double-click **start.cmd**. Closing the review window leaves Che
 | Control | Action |
 |---|---|
 | Tap **F9** | Save a screenshot as an open task. |
-| Double-tap **F9** | Reopen the last task to edit it. |
+| Double-tap **F9** | Reopen the last task with a temporary screenshot draft. |
 | Hold **F9** | Open the main menu to review your tasks. |
 | Tap, release, then quickly hold **F9** | Save a screenshot and voice note. Speak during the hold; release to save. |
 
 When F9 opens a capture without dictation, the note box is focused so you can type immediately. The Marker stays selected; click the image to draw. You can also click **Dictate note**, then **Save**. For voice notes, enable your microphone in **Settings → Audio** and download the speech model in **Settings → Transcript**.
 
 Captures open the editor immediately by default. Turn **Settings → General → Show capture editor immediately** off to capture without opening it, or on to review, annotate, and add notes as you capture. The option sits above automatic clipboard copying.
+
+Double-tap **F9** to edit the last task and take another screenshot as a **Draft · click to add** tab. The previous image stays selected. Click the draft tab to keep the screenshot and start editing it; click its **×** to discard it immediately. Unaccepted drafts stay temporary, are replaced on the next edit, and are dropped when the editor closes. They never appear in copied task images or clipboard copies until you click to add them.
 
 - Click the **pencil** or double-tap **F9** to open the same capture workspace: image tabs and drawing tools beside the note and transcript. There is no separate image-editing step or category picker.
 - Start drawing immediately with the **red 12 px Marker**, or choose **Highlighter**, **Shapes**, **Text**, or **Eraser**. Shapes starts with a **red 12 px Arrow**; Highlighter defaults to **20 px**. Image tabs retain unsaved drawings and crops while you switch between them.

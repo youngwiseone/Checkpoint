@@ -44,7 +44,7 @@ class CaptureButton:
             self._continuation = True
             return True
 
-    def tap(self, grab, note, now, latest=lambda: None, voice=lambda: None):
+    def tap(self, grab, note, now, latest=lambda: None, voice=lambda: None, draft=None):
         with self._lock:
             if self.pending is not None and not self._continuation and now() - self.pending_at > .45:
                 self._finish(self.pending)
@@ -54,6 +54,7 @@ class CaptureButton:
                 return
             self.pending = object()
             self._pending_grab, self._note, self._latest, self._voice = grab, note, latest, voice
+            self._draft = draft
             self.pending_at = now()
             token = self.pending
             self._timer = self._schedule(.45, lambda: self._finish(token))
@@ -68,22 +69,25 @@ class CaptureButton:
         with self._lock:
             if self.pending is not token or self._continuation:
                 return
-            grab, note, latest = self._pending_grab, self._note, self._latest
+            grab, note, latest, draft = self._pending_grab, self._note, self._latest, self._draft
             self._cancel_pending()
             if not edit:
                 self.previous = grab()
             else:
                 self.previous = latest() or self.previous
+                existing = self.previous is not None
                 if self.previous is None:
                     self.previous = grab()
                 if self.previous:
-                    note({**self.previous, 'needs_note': True})
+                    note({**self.previous, 'needs_note': True,
+                          **({'draft_capture': draft()} if existing and draft else {})})
 
     def _cancel_pending(self):
         if self._timer:
             self._timer.cancel()
         self.pending = self._timer = None
         self._continuation = False
+        self._pending_grab = self._note = self._latest = self._voice = self._draft = None
 
     def clear(self):
         with self._lock:

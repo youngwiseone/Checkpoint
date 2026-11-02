@@ -20,6 +20,8 @@ from .playback import VoicePlayback
 from .screenshot import ScreenshotDialog, ScreenshotWorkspace
 from .windows import microphone_icon, popup_css
 
+DRAFT_CAPTURE_TAB = '__draft_capture__'
+
 
 def capture_path(capture_id, original=False):
     from ..services.cropping import original_path
@@ -42,6 +44,8 @@ class CaptureEditor(GlassDialog):
         self.on_menu = on_menu
         self.item_id, self.item, self.payload = None, None, {}
         self.workspaces = {}
+        self._draft_capture = None
+        self._accepting_draft = False
         self._dictation = self._recording = None
         self._recording_capture = None
         self._dictation_save = self._closing = self._snip_pending = False
@@ -65,6 +69,7 @@ class CaptureEditor(GlassDialog):
         self.image_tabs.setMinimumWidth(0)
         self.image_tabs.setAccessibleName('Task screenshots')
         self.image_tabs.currentChanged.connect(self._select_image)
+        self.image_tabs.tabBarClicked.connect(self._draft_tab_clicked)
         self.image_tabs.tabCloseRequested.connect(self._remove_image)
         header.addWidget(self.image_tabs, 1)
         self.add_image_btn = QPushButton('+')
@@ -175,6 +180,7 @@ class CaptureEditor(GlassDialog):
 
     def _load_payload(self, payload):
         payload = dict(payload)
+        self._draft_capture = payload.pop('draft_capture', None)
         if payload.get('id'):
             from ..services.task_evidence import capture_editor_payload
             try:
@@ -202,6 +208,9 @@ class CaptureEditor(GlassDialog):
         same = bool(self.payload) and (payload.get('item_id') == self.item_id if payload.get('item_id')
                                       else payload.get('id') == self.payload.get('id'))
         if same and self.isVisible():
+            if 'draft_capture' in payload:
+                self._draft_capture = payload['draft_capture']
+                self._refresh_images()
             self.raise_()
             self.activateWindow()
             return
@@ -239,6 +248,7 @@ class CaptureEditor(GlassDialog):
         self.context_timer.start()
 
     def _clear_images(self):
+        self._draft_capture = None
         self.image_tabs.blockSignals(True)
         while self.image_tabs.count():
             self.image_tabs.removeTab(0)
@@ -271,30 +281,79 @@ class CaptureEditor(GlassDialog):
                 tab = self.image_tabs.addTab(QIcon(workspace.image.source.scaled(64, 40,
                     Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)), f'Image {index + 1}')
                 self.image_tabs.setTabData(tab, cid)
-                close = QPushButton()
-                close.setIcon(control_icon('close'))
-                close.setIconSize(QSize(12, 12))
-                close.setFixedSize(22, 22)
-                close.setAccessibleName(f'Delete image {index + 1}')
-                close.setToolTip('Delete this image')
-                close.setStyleSheet('QPushButton { background: transparent; border: none; border-radius: 11px; '
-                                    'padding: 2px; min-height: 18px; min-width: 18px; } '
-                                    'QPushButton:hover { background: rgba(120, 140, 165, 40); }')
-                close.clicked.connect(lambda checked=False, capture_id=cid: self._remove_image(next(
-                    (i for i in range(self.image_tabs.count()) if self.image_tabs.tabData(i) == capture_id), -1)))
-                self.image_tabs.setTabButton(tab, QTabBar.ButtonPosition.RightSide, close)
+                self._tab_close_button(tab, cid, f'Delete image {index + 1}')
             except (ValueError, OSError) as error:
                 self._show_error(str(error))
+        if self._draft_capture is not None:
+            thumb = QPixmap()
+            thumb.loadFromData(self._draft_capture.get('thumb_jpeg') or self._draft_capture['png'])
+            tab = self.image_tabs.addTab(QIcon(thumb), 'Draft · click to add')
+            self.image_tabs.setTabData(tab, DRAFT_CAPTURE_TAB)
+            self.image_tabs.setTabTextColor(tab, colors.current().muted)
+            self.image_tabs.setTabToolTip(tab, 'Temporary screenshot. Click to add it to this task; × discards it.')
+            self._tab_close_button(tab, DRAFT_CAPTURE_TAB, 'Discard temporary screenshot')
+        saved_tabs = [i for i in range(self.image_tabs.count())
+                      if self.image_tabs.tabData(i) != DRAFT_CAPTURE_TAB]
         selected_index = next((i for i in range(self.image_tabs.count())
-                               if self.image_tabs.tabData(i) == selected), 0)
+                               if self.image_tabs.tabData(i) == selected and i in saved_tabs),
+                              saved_tabs[0] if saved_tabs else -1)
         if select_new:
-            selected_index = self.image_tabs.count() - 1
+            selected_index = saved_tabs[-1] if saved_tabs else -1
         self.image_tabs.setCurrentIndex(selected_index)
         self.image_tabs.blockSignals(False)
         self._select_image(self.image_tabs.currentIndex())
 
+    def _tab_close_button(self, tab, identifier, label):
+        close = QPushButton()
+        close.setIcon(control_icon('close'))
+        close.setIconSize(QSize(12, 12))
+        close.setFixedSize(22, 22)
+        close.setAccessibleName(label)
+        close.setToolTip(label)
+        close.setStyleSheet('QPushButton { background: transparent; border: none; border-radius: 11px; '
+                            'padding: 2px; min-height: 18px; min-width: 18px; } '
+                            'QPushButton:hover { background: rgba(120, 140, 165, 40); }')
+        close.clicked.connect(lambda checked=False: self._remove_image(next(
+            (i for i in range(self.image_tabs.count()) if self.image_tabs.tabData(i) == identifier), -1)))
+        self.image_tabs.setTabButton(tab, QTabBar.ButtonPosition.RightSide, close)
+
+    def _draft_tab_clicked(self, index):
+        if (self.image_tabs.tabData(index) != DRAFT_CAPTURE_TAB or self._draft_capture is None or
+                self._accepting_draft or not self.item_id):
+            return
+        from ..services.task_evidence import accept_draft_capture
+        self._accepting_draft = True
+        try:
+            cid = accept_draft_capture(self.item_id, self._draft_capture)
+            self._draft_capture = None
+            self._reload_evidence()
+            accepted = next((i for i in range(self.image_tabs.count())
+                             if self.image_tabs.tabData(i) == cid), -1)
+            self.image_tabs.setCurrentIndex(accepted)
+            if cid in self.workspaces:
+                self.workspaces[cid].image.setFocus(Qt.FocusReason.MouseFocusReason)
+        except Exception as error:  # A failed add must leave the screenshot available for retry.
+            self._show_error(f'Could not add the draft screenshot: {error}')
+            self._restore_saved_tab()
+        finally:
+            self._accepting_draft = False
+
+    def _restore_saved_tab(self):
+        selected = self.payload.get('id')
+        saved = [i for i in range(self.image_tabs.count())
+                 if self.image_tabs.tabData(i) != DRAFT_CAPTURE_TAB]
+        index = next((i for i in saved if self.image_tabs.tabData(i) == selected), saved[0] if saved else -1)
+        blocked = self.image_tabs.blockSignals(True)
+        self.image_tabs.setCurrentIndex(index)
+        self.image_tabs.blockSignals(blocked)
+        if index >= 0:
+            self._select_image(index)
+
     def _select_image(self, index):
         cid = self.image_tabs.tabData(index)
+        if cid == DRAFT_CAPTURE_TAB:
+            self._restore_saved_tab()
+            return
         if cid in self.workspaces:
             self.payload['id'] = cid
             self.images.setCurrentWidget(self.workspaces[cid])
@@ -432,6 +491,10 @@ class CaptureEditor(GlassDialog):
         if index is None:
             index = self.image_tabs.currentIndex()
         cid = self.image_tabs.tabData(index)
+        if cid == DRAFT_CAPTURE_TAB:
+            self._draft_capture = None
+            self._refresh_images()
+            return
         if not cid:
             return
         if ((self._recording and cid == self._recording_capture) or
@@ -640,6 +703,13 @@ class CaptureEditor(GlassDialog):
         self.layout().activate()
 
     def _close(self, result=0):
+        self._draft_capture = None
+        draft_tab = next((i for i in range(self.image_tabs.count())
+                          if self.image_tabs.tabData(i) == DRAFT_CAPTURE_TAB), -1)
+        if draft_tab >= 0:
+            blocked = self.image_tabs.blockSignals(True)
+            self.image_tabs.removeTab(draft_tab)
+            self.image_tabs.blockSignals(blocked)
         self._cancel_dictation()
         self.context_timer.stop()
         self.playback.stop()

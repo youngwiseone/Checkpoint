@@ -184,7 +184,31 @@ class DesktopHost:
                 return self.core.capture.hotkey_capture(ask_context=not has_audio,
                     reason=None if has_audio else 'no_audio', **({'prepared': prepared} if prepared else {}))
             self.capture_button.tap(grab, self.bridge.note_requested.emit, time.monotonic,
-                                    latest=self._latest_note, voice=lambda: self._start_held_note(prepared))
+                                    latest=self._latest_note, voice=lambda: self._start_held_note(prepared),
+                                    draft=lambda: self._draft_capture(prepared))
+
+    def _draft_capture(self, prepared):
+        """Freeze a candidate for an edit without creating media or task records."""
+        from datetime import datetime, timezone
+        from ..capture import screen
+        active = self.core.sessions.active
+        try:
+            if prepared:
+                frame, mono, taken = prepared
+            else:
+                mono, taken = time.monotonic(), datetime.now(timezone.utc)
+                frame = screen.grab(active.capture_target if active else 'foreground', get_settings().capture.region)
+            for warning in frame.warnings:
+                hooks.emit_toast('warning', warning, frame.work_rect)
+            return {'png': frame.png, 'thumb_jpeg': frame.thumb_jpeg,
+                    'width': frame.width, 'height': frame.height, 'monitor': frame.monitor,
+                    'window_title': frame.window_title, 'taken_at': taken,
+                    'project_id': active.project_id if active else get_settings().last_project_id,
+                    'session_id': active.id if active else None,
+                    'offset_ms': active.clock.offset_ms(mono) if active else None}
+        except Exception as error:
+            hooks.emit_toast('warning', f'Could not take a draft screenshot: {error}')
+            return None
 
     def _start_held_note(self, prepared):
         payload = self.core.capture.hotkey_capture(False, prepared=prepared, quiet=True) if prepared else None

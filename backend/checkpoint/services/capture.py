@@ -214,7 +214,8 @@ class CaptureService:
                 "taken_at": taken_at.isoformat(), "thumb_rel_path": thumb_rel, "image_rel_path": img_rel}
 
     def import_image(self, png: bytes, thumb: bytes, width: int, height: int, *, project_id: str, session_id: Optional[str],
-                     offset_ms: Optional[int], taken_at: datetime, status: str, trigger: str = "demo", attach_to=None) -> str:
+                     offset_ms: Optional[int], taken_at: datetime, status: str, trigger: str = "demo", attach_to=None,
+                     monitor: Optional[dict] = None, window_title: str = "") -> str:
         cid = new_id()
         folder = session_id or f"project-{project_id}"
         img_rel, thumb_rel = f"{folder}/{cid}.png", f"{folder}/{cid}_thumb.jpg"
@@ -229,7 +230,8 @@ class CaptureService:
                         raise ValueError('Task not found in this project')
                 s.add(Capture(id=cid, session_id=session_id, project_id=project_id, taken_at=taken_at, offset_ms=offset_ms,
                               image_rel_path=img_rel, thumb_rel_path=thumb_rel, sha256=sha256_bytes(png), width=width, height=height,
-                              monitor={'cropped': True} if trigger == 'snip' else {}, window_title="", trigger=trigger, status=status))
+                              monitor=monitor if monitor is not None else ({'cropped': True} if trigger == 'snip' else {}),
+                              window_title=window_title, trigger=trigger, status=status))
                 if attach_to:
                     s.flush()
                     s.add(EvidenceLink(work_item_id=attach_to, capture_id=cid, confidence='direct', attached_by='user'))

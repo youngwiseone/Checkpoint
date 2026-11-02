@@ -45,6 +45,23 @@ def last_editor_payload(project_id):
             'category': item['type'], 'evidence': item['evidence']}
 
 
+def accept_draft_capture(item_id, draft):
+    """Persist a temporary edit screenshot only after its tab is explicitly chosen."""
+    from .capture import CaptureService
+    from .review import get_work_item
+    item = get_work_item(item_id)
+    if item['work_status'] not in ('open', 'in_progress', 'done'):
+        raise ValueError('Reopen the task before adding this screenshot.')
+    if draft.get('project_id') != item['project_id']:
+        raise ValueError('The draft screenshot belongs to another project.')
+    return CaptureService(None).import_image(
+        draft['png'], draft['thumb_jpeg'], draft['width'], draft['height'],
+        project_id=item['project_id'], session_id=draft.get('session_id'),
+        offset_ms=draft.get('offset_ms'), taken_at=draft['taken_at'], status='saved',
+        trigger='edit', attach_to=item_id, monitor=draft.get('monitor', {}),
+        window_title=draft.get('window_title', ''))
+
+
 def attach_capture(item_id, capture_id):
     with write_session() as s:
         w, c = s.get(WorkItem, item_id), s.get(Capture, capture_id)
