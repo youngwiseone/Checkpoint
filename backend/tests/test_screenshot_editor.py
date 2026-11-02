@@ -70,7 +70,7 @@ def test_shapes_text_crop_zoom_and_undo(editor):
     for index in range(editor.shape.count()):
         editor.shape.setCurrentIndex(index)
         gesture(canvas, at(canvas, 20, 20), at(canvas, 100, 80))
-    assert [mark.tool for mark in canvas.marks] == ['rectangle', 'ellipse', 'line', 'arrow']
+    assert [mark.tool for mark in canvas.marks] == ['arrow', 'rectangle', 'ellipse', 'line']
     canvas.add_text(QPointF(110, 20), 'A note\nSecond line')
     assert canvas.render_image().copy(110, 20, 150, 70) != canvas.source.toImage().copy(110, 20, 150, 70)
     editor.set_tool('crop')
@@ -188,13 +188,35 @@ def test_zoomed_drawing_and_second_crop_use_current_image_coordinates(editor):
 
 def test_main_task_uses_same_screenshot_editor(editor, monkeypatch):
     from checkpoint.desktop import editor as task_editor
+    from checkpoint.desktop.screenshot import ScreenshotWorkspace
+    from checkpoint.db import read_session
+    from checkpoint.models import Capture
     from checkpoint.services.inbox import ensure_capture
+    from checkpoint.services.review import get_work_item
+    from checkpoint.storage import media_path
+    from PIL import Image
     from unittest.mock import Mock
     wid = ensure_capture(editor.capture_id)
     dialog = task_editor.TaskDialog(wid)
-    opened = Mock(return_value=Mock())
+    opened = Mock(side_effect=AssertionError('The task already contains its image editor'))
     monkeypatch.setattr(task_editor, 'ScreenshotDialog', opened)
-    dialog._edit_image()
-    opened.assert_called_once_with(editor.capture_id, dialog)
-    opened.return_value.exec.assert_called_once()
-    dialog.close()
+    try:
+        dialog.show()
+        QApplication.processEvents()
+        workspace = dialog.workspaces[editor.capture_id]
+        assert isinstance(workspace, ScreenshotWorkspace)
+        assert type(workspace.image) is type(editor.image)
+        assert dialog.images.currentWidget() is workspace
+        assert workspace.tool_buttons['pencil'].isChecked()
+        gesture(workspace.image, at(workspace.image, 20, 30), at(workspace.image, 100, 30))
+        dialog.description.setPlainText('Image and note edited together')
+        dialog._save()
+        assert dialog.result() == dialog.DialogCode.Accepted
+        assert get_work_item(wid)['description'] == 'Image and note edited together'
+        with read_session() as session:
+            capture = session.get(Capture, editor.capture_id)
+            with Image.open(media_path(capture.image_rel_path)) as saved:
+                assert saved.getpixel((50, 30))[0] > 200
+        opened.assert_not_called()
+    finally:
+        dialog.hide()

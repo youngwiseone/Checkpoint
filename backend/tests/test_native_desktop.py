@@ -151,29 +151,37 @@ def test_native_selection_maps_letterboxed_image_and_crop(app_env):
 def test_note_window_context_menu_can_edit_screenshot(app_env, monkeypatch):
     application = app()
     from checkpoint.desktop import editor
+    from checkpoint.desktop.screenshot import ScreenshotWorkspace
     from checkpoint.desktop.windows import NoteWindow
+    from checkpoint.services.task_evidence import capture_editor_payload
+    from test_simple_inbox import captured
+    from test_screenshot_editor import at, gesture
+    from PySide6.QtGui import QColor
 
-    opened = []
-
-    class FakeScreenshotDialog:
-        def __init__(self, capture_id, parent):
-            opened.append((capture_id, parent))
-
-        def exec(self):
-            return 0
-
-    monkeypatch.setattr(editor, "ScreenshotDialog", FakeScreenshotDialog)
-    monkeypatch.setattr(editor, "capture_path", lambda capture_id: "missing.png")
-    window = NoteWindow(Mock(), Mock(), Mock())
-    window.open_for({"id": "capture-1", "thumb_path": "missing.png"})
-    assert window.edit_image_btn.isVisible()
-    window.text.setPlainText("Remember this detail")
-    window.edit_image_btn.click()
-    assert opened == [("capture-1", window)]
-    assert window.text.toPlainText() == "Remember this detail"
-    window.open_for({})
-    assert not window.edit_image_btn.isVisible()
-    window.close()
+    _, cid, _ = captured(app_env)
+    nested = Mock(side_effect=AssertionError('Image editing must remain embedded'))
+    monkeypatch.setattr(editor, 'ScreenshotDialog', nested)
+    saved = Mock(return_value=None)
+    window = NoteWindow(saved, Mock(), Mock(return_value=None))
+    try:
+        window.open_for(capture_editor_payload(cid))
+        application.processEvents()
+        workspace = window.workspaces[cid]
+        assert isinstance(workspace, ScreenshotWorkspace)
+        assert window.images.currentWidget() is workspace
+        assert workspace.isVisible() and workspace.tool_buttons['pencil'].isChecked()
+        assert workspace.image.stroke_width == 12
+        assert QColor(workspace.image.color) == QColor('#ff4040')
+        window.text.setPlainText('Remember this detail')
+        gesture(workspace.image, at(workspace.image, 20, 30), at(workspace.image, 100, 30))
+        assert workspace.image.render_image().pixelColor(50, 30).red() > 200
+        assert window.text.toPlainText() == 'Remember this detail'
+        window._save()
+        saved.assert_called_once()
+        assert saved.call_args.args[1:] == ('Remember this detail', None)
+        nested.assert_not_called()
+    finally:
+        window.hide()
 
 
 def test_desktop_open_uses_native_panel(app_env, monkeypatch):

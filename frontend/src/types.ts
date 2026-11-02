@@ -320,7 +320,7 @@ export interface Settings {
   retention: { deleted_days: number | null; done_days: number | null };
   first_run_complete: boolean;
   hotkeys: { capture: string; capture_context: string; quick_note: string; start_session: string; review: string; switch_project: string };
-  capture: { always_ask_context: boolean; auto_copy_latest: boolean; region: "foreground_monitor" | "foreground_window"; debounce_ms: number };
+  capture: { always_ask_context: boolean; show_editor_on_capture: boolean; auto_copy_latest: boolean; region: "foreground_monitor" | "foreground_window"; debounce_ms: number };
   audio: {
     mic_enabled: boolean;
     mic_device: string | null;

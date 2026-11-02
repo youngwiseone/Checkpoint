@@ -13,7 +13,6 @@ from . import colors
 from .colors import css
 from .glass import GlassDialog, get_text
 from .icons import control_icon
-from .windows import screen_under_mouse
 
 
 @dataclass(frozen=True)
@@ -79,6 +78,7 @@ def paint_mark(painter, mark):
 class ScreenshotCanvas(QWidget):
     changed = Signal()
     text_requested = Signal(QPointF)
+    crop_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -89,7 +89,7 @@ class ScreenshotCanvas(QWidget):
         self.redo_stack = []
         self.tool = 'pencil'
         self.color = '#ff4040'
-        self.stroke_width = 3
+        self.stroke_width = 12
         self.font_size = 24
         self.selection = None  # Widget coordinates; image geometry is independent.
         self.start = None
@@ -97,6 +97,7 @@ class ScreenshotCanvas(QWidget):
         self.erasing = False
         self.restored = False
         self.setMinimumSize(260, 220)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setAccessibleName('Screenshot drawing area')
 
@@ -196,6 +197,7 @@ class ScreenshotCanvas(QWidget):
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton or not self.image_rect().contains(event.position().toPoint()):
             return
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
         self.start = self.point(event.position())
         if self.tool == 'text':
             point = self.start
@@ -248,6 +250,17 @@ class ScreenshotCanvas(QWidget):
         self.cancel_gesture()
         super().resizeEvent(event)
 
+    def keyPressEvent(self, event):
+        modifiers = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier |
+                     Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.MetaModifier)
+        if (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and
+                not event.modifiers() & modifiers and self.tool == 'crop' and
+                self.selection is not None):
+            self.crop_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def render_image(self):
         image = QImage(self.view.size(), QImage.Format.Format_RGB32)
         image.fill(Qt.GlobalColor.white)
@@ -285,19 +298,20 @@ class ScreenshotCanvas(QWidget):
             painter.drawRect(self.selection)
 
 
-class ScreenshotDialog(GlassDialog):
-    def __init__(self, capture_id, parent=None):
+class ScreenshotWorkspace(QWidget):
+    """An image editor embedded directly beside a task's note.
+
+    Keep one workspace per capture to retain unsaved marks, crops, and history
+    while switching image tabs. The containing task window owns save/discard.
+    """
+
+    changed = Signal()
+
+    def __init__(self, capture_id=None, parent=None):
         super().__init__(parent)
-        from .editor import capture_path
-        from ..db import read_session
-        from ..models import Capture
         self.capture_id = capture_id
-        with read_session() as session:
-            capture = session.get(Capture, capture_id)
-            if capture is None or capture.status == 'discarded':
-                raise ValueError('Screenshot not found')
-            self.expected_sha = capture.sha256
-        self.setWindowTitle('Edit image')
+        self.expected_sha = None
+        self._saved_state = None
         theme = colors.current()
         self.setStyleSheet(self.styleSheet() + f'''
 QPushButton[imageControl="true"], QComboBox#imageShape, QSpinBox#imageValue {{
@@ -310,17 +324,16 @@ QSlider::sub-page:horizontal {{ background: {css(theme.accent)}; border-radius: 
 QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {css(theme.accent)}; }}
 ''')
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         self.image = ScreenshotCanvas()
-        self.image.load(capture_path(capture_id))
         self.tool_buttons = {}
         self.active_tool = None
-        self.tool_settings = {'pencil': ('#ff4040', 3), 'highlighter': ('#ffe600', 20),
-                              'shape': ('#ff4040', 3), 'text': ('#ff4040', 3)}
-        tools = QHBoxLayout()
+        self.tool_settings = {'pencil': ('#ff4040', 12), 'highlighter': ('#ffe600', 20),
+                              'shape': ('#ff4040', 12), 'text': ('#ff4040', 3)}
+        tools = self.tools_layout = QHBoxLayout()
         tools.setSpacing(6)
-        for key, label in (('pencil', 'Pencil'), ('highlighter', 'Highlighter'), ('eraser', 'Eraser'),
+        for key, label in (('pencil', 'Marker'), ('highlighter', 'Highlighter'), ('eraser', 'Eraser'),
                            ('shape', 'Shapes'), ('text', 'Text'), ('crop', 'Crop')):
             button = QPushButton(label)
             button.setCheckable(True)
@@ -330,19 +343,12 @@ QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; b
             self.tool_buttons[key] = button
             tools.addWidget(button)
         tools.addStretch()
-        self.close_button = QPushButton()
-        self.close_button.setObjectName('imageClose')
-        self.close_button.setIcon(control_icon('close'))
-        self.close_button.setAccessibleName('Close image editor')
-        self.close_button.setToolTip('Close image editor')
-        self.close_button.clicked.connect(self.reject)
-        tools.addWidget(self.close_button)
         layout.addLayout(tools)
         options = QHBoxLayout()
         options.setSpacing(6)
         self.shape = QComboBox()
         self.shape.setObjectName('imageShape')
-        for label, key in (('Rectangle', 'rectangle'), ('Ellipse', 'ellipse'), ('Line', 'line'), ('Arrow', 'arrow')):
+        for label, key in (('Arrow', 'arrow'), ('Rectangle', 'rectangle'), ('Ellipse', 'ellipse'), ('Line', 'line')):
             self.shape.addItem(label, key)
         self.shape.setAccessibleName('Shape')
         self.shape.currentIndexChanged.connect(lambda: self.set_tool('shape'))
@@ -356,7 +362,7 @@ QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; b
         self.stroke.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.stroke.setFixedWidth(68)
         self.stroke.setRange(1, 80)
-        self.stroke.setValue(3)
+        self.stroke.setValue(12)
         self.stroke.setSuffix(' px')
         self.stroke.setAccessibleName('Stroke width')
         self.stroke.valueChanged.connect(lambda value: setattr(self.image, 'stroke_width', value))
@@ -430,32 +436,51 @@ QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; b
         restore.clicked.connect(self.restore_original)
         actions.addWidget(restore)
         actions.addWidget(self.message, 1)
-        cancel = QPushButton('Cancel')
-        cancel.setProperty('imageControl', True)
-        cancel.clicked.connect(self.reject)
-        actions.addWidget(cancel)
-        self.save_button = QPushButton('Save')
-        self.save_button.setProperty('imageControl', True)
-        self.save_button.setObjectName('primary')
-        self.save_button.clicked.connect(self._save)
-        actions.addWidget(self.save_button)
         layout.addLayout(actions)
         self.image.changed.connect(self.refresh)
+        self.image.changed.connect(self.changed)
         self.image.text_requested.connect(self.add_text)
+        self.image.crop_requested.connect(self.apply_crop)
         for key, callback in (('Ctrl+Z', self.image.undo), ('Ctrl+Y', self.image.redo),
-                              ('Ctrl+Shift+Z', self.image.redo), ('Ctrl+S', self._save)):
+                              ('Ctrl+Shift+Z', self.image.redo)):
             shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(callback)
         self._last_geometry = None
         self.fit()
         self.set_tool('pencil')
         self.refresh_color()
         self.refresh()
+        if capture_id is not None:
+            self.load(capture_id)
 
-    def place_on_screen(self):
-        screen = screen_under_mouse()
-        if screen:
-            self.setGeometry(screen.availableGeometry())
+    def load(self, capture_id):
+        from ..db import read_session
+        from ..models import Capture
+        from ..storage import media_path
+
+        with read_session() as session:
+            capture = session.get(Capture, capture_id)
+            if capture is None or capture.status == 'discarded' or capture.media_removed_at:
+                raise ValueError('Screenshot not found')
+            path, self.expected_sha = media_path(capture.image_rel_path), capture.sha256
+        self.capture_id = capture_id
+        self.image.undo_stack.clear()
+        self.image.redo_stack.clear()
+        self.image.restored = False
+        self.image.load(path)
+        self._saved_state = self._state()
+        self.fit()
+        self.refresh()
+
+    def _state(self):
+        return (self.image.source.cacheKey(), self.image.view.getRect(),
+                tuple(self.image.marks), self.image.restored)
+
+    @property
+    def dirty(self):
+        return (not self.image.source.isNull() and
+                (self.image.selection is not None or self._state() != self._saved_state))
 
     def set_tool(self, tool):
         if self.active_tool in self.tool_settings:
@@ -473,14 +498,14 @@ QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; b
         self.color_button.setVisible(tool not in ('eraser', 'crop'))
         self.crop_button.setVisible(tool == 'crop')
         if tool in self.tool_settings:
-            self.image.color, width = self.tool_settings[tool]
-            self.stroke.setValue(width)
+            self.image.color, self.image.stroke_width = self.tool_settings[tool]
+            self.stroke.setValue(self.image.stroke_width)
         self.refresh_color()
         self.message.setText({'pencil': 'Draw on the image. Choose a color and stroke width.',
             'highlighter': 'Draw translucent highlights over words or areas.',
             'eraser': 'Drag over marks to remove them. Erases annotations added during this editing session.',
             'shape': 'Drag to draw the selected shape.', 'text': 'Click the image to add text.',
-            'crop': 'Drag around the area to keep, then choose Apply crop. The cropped image will fill the view.'}[tool])
+            'crop': 'Drag around the area to keep, then press Enter or choose Apply crop. The cropped image will fill the view.'}[tool])
         self.message.setToolTip(self.message.text())
         self.refresh()
 
@@ -508,9 +533,18 @@ QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; b
             self.message.setText(str(error))
 
     def restore_original(self):
-        from .editor import capture_path
+        from ..db import read_session
+        from ..models import Capture
+        from ..services.cropping import original_path
+        from ..storage import media_path
         try:
-            path = capture_path(self.capture_id, original=True)
+            with read_session() as session:
+                capture = session.get(Capture, self.capture_id)
+                if capture is None:
+                    raise ValueError('Original screenshot unavailable')
+                path = original_path(capture)
+                if not path.exists():
+                    path = media_path(capture.image_rel_path)
             if QPixmap(str(path)).isNull():
                 raise ValueError('Original screenshot unavailable')
             self.image.remember()
@@ -543,22 +577,99 @@ QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; b
         self.undo_button.setEnabled(bool(self.image.undo_stack))
         self.redo_button.setEnabled(bool(self.image.redo_stack))
         self.crop_button.setEnabled(self.image.tool == 'crop' and self.image.selection is not None)
-        self.save_button.setEnabled(not self.image.source.isNull())
         self.image.update()
 
-    def _save(self):
+    def export_png(self):
+        """Encode the current draft without persisting or closing the editor."""
+        if self.image.source.isNull():
+            raise ValueError('Screenshot unavailable')
+        if self.image.selection is not None:
+            self.image.apply_crop()
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not self.image.render_image().save(buffer, 'PNG'):
+            raise OSError('Could not encode the edited screenshot')
+        buffer.close()
+        return bytes(data)
+
+    def commit(self):
+        """Save a changed draft; reject stale revisions before touching the file."""
+        from ..db import read_session
+        from ..models import Capture
         from ..services.cropping import save_image
+
+        with read_session() as session:
+            capture = session.get(Capture, self.capture_id)
+            if capture is None or capture.status == 'discarded' or capture.media_removed_at:
+                raise ValueError('Screenshot not found')
+            if capture.sha256 != self.expected_sha:
+                raise ValueError('Screenshot changed elsewhere. Reopen the editor to load the latest image.')
+        if not self.dirty:
+            return False
+        save_image(self.capture_id, self.export_png(), expected_sha=self.expected_sha,
+                   cropped=self.image.view != self.image.source.rect(), restored=self.image.restored)
+        # Reload the new revision so a subsequent Save is safe and does not burn
+        # the same draft into the image again.
+        self.load(self.capture_id)
+        self.changed.emit()
+        return True
+
+
+class ScreenshotDialog(GlassDialog):
+    """Compatibility shell; task editing embeds ScreenshotWorkspace directly."""
+
+    def __init__(self, capture_id, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Edit image')
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+        self.workspace = ScreenshotWorkspace(capture_id, self)
+        # QWidget already defines scroll(); preserve the previous public widget
+        # attribute for callers of the compatibility dialog.
+        self.scroll = self.workspace.scroll
+        layout.addWidget(self.workspace, 1)
+        self.close_button = QPushButton()
+        self.close_button.setObjectName('imageClose')
+        self.close_button.setIcon(control_icon('close'))
+        self.close_button.setAccessibleName('Close image editor')
+        self.close_button.setToolTip('Close image editor')
+        self.close_button.clicked.connect(self.reject)
+        self.workspace.tools_layout.addWidget(self.close_button)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        cancel = QPushButton('Cancel')
+        cancel.setProperty('imageControl', True)
+        cancel.clicked.connect(self.reject)
+        actions.addWidget(cancel)
+        self.save_button = QPushButton('Save')
+        self.save_button.setProperty('imageControl', True)
+        self.save_button.setObjectName('primary')
+        self.save_button.clicked.connect(self._save)
+        actions.addWidget(self.save_button)
+        layout.addLayout(actions)
+        shortcut = QShortcut(QKeySequence('Ctrl+S'), self)
+        shortcut.activated.connect(self._save)
+
+    def __getattr__(self, name):
+        workspace = self.__dict__.get('workspace')
+        if workspace is not None:
+            try:
+                return getattr(workspace, name)
+            except AttributeError:
+                pass
+        raise AttributeError(name)
+
+    def place_on_screen(self):
+        from .windows import screen_under_mouse
+        screen = screen_under_mouse()
+        if screen:
+            self.setGeometry(screen.availableGeometry())
+
+    def _save(self):
         try:
-            if self.image.selection is not None:
-                self.image.apply_crop()
-            data = QByteArray()
-            buffer = QBuffer(data)
-            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            if not self.image.render_image().save(buffer, 'PNG'):
-                raise OSError('Could not encode the edited screenshot')
-            buffer.close()
-            save_image(self.capture_id, bytes(data), expected_sha=self.expected_sha,
-                       cropped=self.image.view != self.image.source.rect(), restored=self.image.restored)
+            self.workspace.commit()
             self.accept()
         except (ValueError, OSError) as error:
-            self.message.setText(str(error))
+            self.workspace.message.setText(str(error))

@@ -281,7 +281,10 @@ def test_native_settings_save_and_retired_task_preview(app_env, monkeypatch):
     assert not panel._pixmap(item).isNull()
     editor = TaskDialog(wid)
     assert editor.description.toPlainText() == 'Keep this original note'
-    assert not editor.screenshot.source.isNull() and not editor.edit_image_btn.isEnabled()
+    assert not editor.workspaces and editor.image_tabs.count() == 0
+    assert editor.images.currentWidget() is editor.empty_image
+    assert 'No image attached' in editor.empty_image.text()
+    assert editor.add_image_btn.isEnabled()
     editor.close()
     panel.close()
 

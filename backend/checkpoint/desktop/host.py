@@ -138,7 +138,7 @@ class DesktopHost:
         if action == 'press':
             self._prepared_press = None
             self._press_recording = None
-            if self.note_window.isVisible() or self.overlay.isVisible() or self.app.activeModalWidget() is not None:
+            if self.note_window.isVisible() or getattr(self.note_window, '_snip_pending', False) or self.overlay.isVisible() or self.app.activeModalWidget() is not None:
                 self.capture_button.clear()
                 return
             continuation = self.capture_button.press(time.monotonic)
@@ -175,7 +175,7 @@ class DesktopHost:
             prepared = getattr(self, '_prepared_press', None)
             self._prepared_press = None
             def grab():
-                if self.note_window.isVisible() or self.overlay.isVisible() or self.app.activeModalWidget() is not None:
+                if self.note_window.isVisible() or getattr(self.note_window, '_snip_pending', False) or self.overlay.isVisible() or self.app.activeModalWidget() is not None:
                     return None
                 active = self.core.sessions.active
                 has_audio = bool(active and self.core.sessions.audio_functioning() and any(
@@ -199,16 +199,29 @@ class DesktopHost:
             self.bridge.held_note.emit((payload, recording))
             hooks.emit_toast('info', 'Listening… release the capture key to save your voice note.', payload.get('work_rect'))
         else:
-            self.bridge.note_requested.emit(payload)
+            if get_settings().capture.show_editor_on_capture:
+                self.bridge.note_requested.emit(payload)
             self.bridge.setup_requested.emit('Audio')
 
     def _track_held_note(self, job):
+        from ..services.inbox import ensure_capture
+        job[0]['item_id'] = ensure_capture(job[0]['id'])
         self._held_jobs.append(job)
         self.held_timer.start()
+        if get_settings().capture.show_editor_on_capture:
+            payload, recording = job
+            self.note_window.open_for(payload)
+            self.note_window.set_recording(recording)
 
     def _poll_held_notes(self):
         for payload, recording in list(self._held_jobs):
             from ..services.voice import retain, finish_note
+            from ..services.review import get_work_item
+            item_id = payload['item_id']
+            if get_work_item(item_id)['work_status'] in ('deleted', 'wont_do'):
+                recording.cancel()
+                self._held_jobs.remove((payload, recording))
+                continue
             if recording.audio and not recording.retained_note_id:
                 try:
                     recording.retained_note_id = retain(payload['id'], recording.audio)
@@ -228,14 +241,14 @@ class DesktopHost:
                     existing = get_work_item(current['item_id'])
                     text = '\n\n'.join(p for p in (existing['description'] if existing['description_edited'] else '', recording.text) if p)
                     self.core.capture.save_capture_note(payload['id'], text)
-                    if self.note_window.isVisible() and self.note_window.payload.get('item_id') == current['item_id']:
-                        editor_text = self.note_window.text.toPlainText()
-                        if recording.text not in editor_text:
-                            self.note_window.text.setPlainText('\n\n'.join(p for p in (editor_text, recording.text) if p))
-                        self.note_window._reload_evidence()
+                    if self.note_window.payload.get('item_id') == current['item_id']:
+                        self.note_window.complete_recording(recording.text)
                     hooks.emit_toast('success', 'Voice note saved · double tap to edit.', payload.get('work_rect'))
                 else:
-                    self.bridge.note_requested.emit(payload)
+                    if self.note_window.payload.get('item_id') == item_id:
+                        self.note_window.complete_recording(error=recording.error)
+                    elif get_settings().capture.show_editor_on_capture:
+                        self.bridge.note_requested.emit(payload)
                     hooks.emit_toast('warning', recording.error or 'No speech detected. Add a note or keep the screenshot.', payload.get('work_rect'))
                     if recording.error:
                         from ..transcription.engine import model_installed
@@ -243,7 +256,8 @@ class DesktopHost:
                 self.core.inbox.wake()
             except Exception as error:
                 hooks.emit_toast('error', f'Could not save voice note: {error}')
-                self.bridge.note_requested.emit(payload)
+                if get_settings().capture.show_editor_on_capture:
+                    self.bridge.note_requested.emit(payload)
         if not self._held_jobs:
             self.held_timer.stop()
 
@@ -293,7 +307,7 @@ class DesktopHost:
         if self.app.activeModalWidget() is not None:
             return
         if self.note_window.isVisible():
-            if self.note_window._dictation is not None:
+            if self.note_window._dictation is not None or self.note_window._recording is not None:
                 hooks.emit_toast('info', 'Finish the voice note before opening the menu.')
                 return
             if not self.note_window._persist_editor():
@@ -359,7 +373,7 @@ class DesktopHost:
                 from ..services.review import update_work_item
                 update_work_item(payload['item_id'], {'description': text,
                                                       **({'title': text.splitlines()[0][:300]} if text.strip() else {}),
-                                                      **({'type': category} if category else {})})
+                                                      **({'type': category} if category else {})}, payload.get('version'))
                 self.toast.show_message('success', 'Note saved', payload.get('work_rect'))
             elif payload.get("id"):
                 self.core.capture.save_capture_note(payload["id"], text, category)
@@ -383,7 +397,15 @@ class DesktopHost:
         try:
             from ..services.inbox import ensure_capture
             from ..services.review import update_work_item
-            update_work_item(ensure_capture(payload["id"]), {"work_status": "wont_do"})
+            item_id = payload.get('item_id') or ensure_capture(payload['id'])
+            update_work_item(item_id, {"work_status": "deleted"})
+            for job in list(self._held_jobs):
+                source, recording = job
+                if source.get('id') == payload.get('id') or source.get('item_id') == item_id:
+                    recording.cancel()
+                    self._held_jobs.remove(job)
+            if not self._held_jobs:
+                self.held_timer.stop()
         except ValueError as e:
             return str(e)
         return None

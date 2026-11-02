@@ -35,12 +35,16 @@ Next time, just double-click **start.cmd**. Closing the review window leaves Che
 | Hold **F9** | Open the main menu to review your tasks. |
 | Tap, release, then quickly hold **F9** | Save a screenshot and voice note. Speak during the hold; release to save. |
 
-Type a note or click **Dictate note**, then **Save**. For voice notes, enable your microphone in **Settings → Audio** and download the speech model in **Settings → Transcript**.
+When F9 opens a capture without dictation, the note box is focused so you can type immediately. The Marker stays selected; click the image to draw. You can also click **Dictate note**, then **Save**. For voice notes, enable your microphone in **Settings → Audio** and download the speech model in **Settings → Transcript**.
 
-- Click the **pencil** to edit a task or its screenshots. Quick notes and the main menu use the same image editor.
-- In **Edit image**, draw with **Pencil** or **Highlighter**, add **Shapes** or **Text**, and use **Eraser** to remove marks added in that editing session. Choose colors, stroke widths, and text sizes.
-- Select **Crop**, drag the area to keep, and click **Apply crop** to enlarge it in the editor. Use **+**, **−**, or **Fit** to change the zoom. **Undo/Redo** (Ctrl+Z / Ctrl+Y) works across annotations and crops.
-- Click **Save** (Ctrl+S) to keep your image edits, or **Cancel** to discard them. **Restore original** previews the untouched screenshot; save to keep the restoration.
+Captures open the editor immediately by default. Turn **Settings → General → Show capture editor immediately** off to capture without opening it, or on to review, annotate, and add notes as you capture. The option sits above automatic clipboard copying.
+
+- Click the **pencil** or double-tap **F9** to open the same capture workspace: image tabs and drawing tools beside the note and transcript. There is no separate image-editing step or category picker.
+- Start drawing immediately with the **red 12 px Marker**, or choose **Highlighter**, **Shapes**, **Text**, or **Eraser**. Shapes starts with a **red 12 px Arrow**; Highlighter defaults to **20 px**. Image tabs retain unsaved drawings and crops while you switch between them.
+- Click **+** beside the image tabs to take another screenshot. Click an image's **×** to delete it after confirmation; the note and remaining images stay.
+- Select **Crop**, drag the area to keep, and press **Enter** or click **Apply crop** to enlarge it in the editor. Use **+**, **−**, or **Fit** to change the zoom. **Undo/Redo** (Ctrl+Z / Ctrl+Y) works across annotations and crops.
+- Click **Save** (Ctrl+S) to save the note and all edited images together. **Discard task** moves the task to Deleted after confirmation. **Restore original** previews the untouched screenshot; save to keep the restoration.
+- The sidebar shows **Listening** while you speak and **Transcribing** after you stop; the current speech model produces the transcript after recording. Keep typing or drawing while it processes. Saving during recording stops it and waits for the transcript before saving your combined note and images.
 - Drag **up** to mark Done or **down** to delete. **Undo** restores the change.
 - **Shift** selects a range; **Ctrl-click** adds or removes individual tasks.
 

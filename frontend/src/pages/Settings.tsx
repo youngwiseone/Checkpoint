@@ -61,6 +61,8 @@ function Shortcuts({ s }: { s: Settings }) {
       <div className="card stack">
         <h3>Capture behaviour</h3>
         <p className="hint">Tap capture for a screenshot, double tap to edit the last task, hold to review, or tap, release, then hold to dictate. The review key is optional; leave it empty to use one key.</p>
+        <Toggle checked={s.capture.show_editor_on_capture} onChange={(v) => patch.mutate({ capture: { show_editor_on_capture: v } })}
+          label="Show capture editor immediately" hint="Open the capture editor when you capture, with screenshots, drawing tools, and the note together." />
         <Toggle checked={s.capture.auto_copy_latest} onChange={(v) => patch.mutate({ capture: { auto_copy_latest: v } })}
           label="Automatically copy latest task to clipboard" hint="Copy the complete task image after capture or voice processing, and refresh it after saved edits." />
         <div className="field" style={{ maxWidth: 420 }}>

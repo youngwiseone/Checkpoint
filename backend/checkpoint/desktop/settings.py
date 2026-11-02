@@ -68,6 +68,10 @@ class SettingsDialog(GlassDialog):
         general.addRow(hint)
         self.region = combo([("Active display", "foreground_monitor"), ("Active window", "foreground_window")], st.capture.region)
         general.addRow("Screenshot area", self.region)
+        self.show_editor_on_capture = QCheckBox("Show capture editor immediately")
+        self.show_editor_on_capture.setChecked(st.capture.show_editor_on_capture)
+        self.show_editor_on_capture.setToolTip("Open the capture editor when you capture, with screenshots, drawing tools, and the note together.")
+        general.addRow(self.show_editor_on_capture)
         self.auto_copy_latest = QCheckBox("Automatically copy latest task to clipboard")
         self.auto_copy_latest.setChecked(st.capture.auto_copy_latest)
         self.auto_copy_latest.setToolTip("Copy the complete task image after capture or voice processing, and refresh it after saved edits.")
@@ -249,6 +253,7 @@ class SettingsDialog(GlassDialog):
             update_settings({"last_project_id": self.project.currentData(), "first_run_complete": True,
                              "hotkeys": {"capture": capture, "review": review},
                              "capture": {"region": self.region.currentData(),
+                                         "show_editor_on_capture": self.show_editor_on_capture.isChecked(),
                                          "auto_copy_latest": self.auto_copy_latest.isChecked()},
                              "retention": {"deleted_days": self.deleted_days.value() or None,
                                            "done_days": self.done_days.value() or None},

@@ -154,10 +154,10 @@ class CaptureService:
         }
         if quiet:
             pass
-        elif needs_note:
+        elif settings.capture.show_editor_on_capture:
             if hooks.request_note:
                 hooks.request_note(payload)
-            else:
+            elif needs_note:
                 notices.push("info", "Screenshot saved to Unfinished captures — add context from the app.", "capture")
         else:
             label = fmt_offset(cap["offset_ms"])
@@ -165,7 +165,7 @@ class CaptureService:
             hooks.emit_toast("success" if not g.warnings else "warning",
                              g.warnings[0] if g.warnings else f"Screenshot saved at {label}{hint}", g.work_rect)
         hooks.emit_state()
-        if not needs_note and not quiet:
+        if not quiet:
             hooks.emit_task_ready(ensure_capture(cap['id']))
         return payload
 

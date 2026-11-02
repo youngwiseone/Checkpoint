@@ -43,8 +43,8 @@ def test_notes_and_toasts_follow_mouse_instead_of_capture_screen(app_env, displa
             window.open_for({'work_rect': old_work})
             toast.show_message('success', 'Note saved', old_work)
             app.processEvents()
-            assert window.geometry().right() == area.right() - 25
-            assert window.geometry().bottom() == area.bottom() - 25
+            assert (window.geometry().center() - area.center()).manhattanLength() <= 2
+            assert area.contains(window.geometry())
             assert toast.geometry().right() == area.right() - 21
             assert toast.geometry().bottom() == area.bottom() - 21
             assert toast.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
