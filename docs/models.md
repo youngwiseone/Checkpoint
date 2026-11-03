@@ -3,30 +3,22 @@
 Neither model is required. Without them, screenshots, typed notes, checklists, review and sharing all work,
 and recorded audio is kept safely until you decide to transcribe it.
 
-## Transcription (faster-whisper)
+## Transcription (Whistle)
 
-1. Settings → Transcription → **Download** next to `base.en` (≈145 MB, recommended starting point).
-   Progress and errors are shown there. Files go to `%LOCALAPPDATA%\Checkpoint\models\whisper\<name>`.
-2. After downloading, transcription runs fully offline.
+1. Open **Settings → Transcript**, select `whistle` (approximately 17 MB) and click **Download selected model**.
+   Progress and errors are shown there. Checkpoint downloads the model and its native runtime only when requested.
+   Files go to `%LOCALAPPDATA%\Checkpoint\models\whistle\whistle` on Windows or
+   `~/.local/share/Checkpoint/models/whistle/whistle` on Linux (or your configured data folder).
+2. After downloading, transcription runs locally on the CPU without an internet connection.
 
-| Model | Size | Notes |
-|---|---|---|
-| tiny.en | ~75 MB | fastest, least accurate |
-| base.en | ~145 MB | default; fine on CPU |
-| small.en | ~485 MB | better accuracy, slower on CPU |
-| medium.en / distil-large-v3 | ~1.5 GB | GPU recommended |
-
-- **CPU** uses int8 and a small number of threads (Settings → Transcription → CPU threads) so it interferes
-  little with games. **After session** timing is recommended: nothing heavy runs while you work.
-- **GPU (CUDA)**: choose *NVIDIA GPU* in Settings. It needs CUDA 12 and cuDNN 9 runtime libraries available to
-  CTranslate2 (see the faster-whisper README). If loading fails the app shows a message and uses the CPU.
+- Whistle supports seven languages and supplies word timestamps for saved transcripts.
+- Choose **Live**, **After recording** or **Off** timing in Settings → Transcript.
 - Background transcription can be paused at any time; recording continues and the backlog resumes later.
-- Transcription and AI organisation run one at a time so they don't compete for memory.
 - The project glossary is passed to the recogniser to help with names like “Sir Spin A Lot”.
 
 ## Local AI organisation (Ollama)
 
-1. Install Ollama for Windows from https://ollama.com. Checkpoint starts its local service
+1. Install Ollama from https://ollama.com (or your Linux distribution's package). Checkpoint starts its local service
    (`ollama serve` on `http://127.0.0.1:11434`) in the background whenever AI features need it.
 2. Settings → Local AI → **Download qwen3:4b with Ollama** (≈2.5 GB), or run `ollama pull qwen3:4b`.
 3. Turn **Local AI organisation** on. New sessions can then enable “Organise with local AI after the session”,

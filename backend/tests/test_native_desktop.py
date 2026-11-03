@@ -1,4 +1,5 @@
 import os
+import sys
 from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -97,6 +98,8 @@ def test_native_settings_save_and_invalid_keys(app_env, monkeypatch):
     assert saved.audio.mic_enabled and saved.appearance.theme == "light"
     assert saved.last_project_id == pid
     dialog.close()
+    if sys.platform.startswith("linux"):
+        return  # the desktop binds shortcuts on Linux, so there is no key to validate
     dialog = settings_dialog(monkeypatch)
     dialog.capture_key.setText("invalid-key")
     dialog._save()

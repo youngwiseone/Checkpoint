@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import shutil
 import sys
 import tomllib
 from pathlib import Path
@@ -57,29 +56,22 @@ def test_handoff_bundle_and_mcp_connector(app_env, monkeypatch):
         assert s.query(Handoff).one().fetched_at is not None
 
 
-def test_connect_and_disconnect_on_copies_of_real_configs(tmp_path, monkeypatch):
+def test_connect_and_disconnect_preserves_unrelated_configs(tmp_path, monkeypatch):
     from checkpoint import integrations as it
 
     appdata, codex_home = tmp_path / "Roaming", tmp_path / ".codex"
     (appdata / "Claude").mkdir(parents=True)
     codex_home.mkdir()
-    real_claude = Path(os.environ["APPDATA"]) / "Claude" / "claude_desktop_config.json"
-    real_codex = Path.home() / ".codex" / "config.toml"
-    if real_claude.is_file():
-        shutil.copy(real_claude, appdata / "Claude" / "claude_desktop_config.json")
-    else:
-        (appdata / "Claude" / "claude_desktop_config.json").write_text('{"preferences": {"x": 1}}')
-    if real_codex.is_file():
-        shutil.copy(real_codex, codex_home / "config.toml")
-    else:
-        (codex_home / "config.toml").write_text('[mcp_servers.other]\ncommand = "x"\n')
+    (appdata / "Claude" / "claude_desktop_config.json").write_text(
+        '{"preferences": {"x": 1}, "mcpServers": {"other": {"command": "x"}}}', encoding="utf-8")
+    (codex_home / "config.toml").write_text('[mcp_servers.other]\ncommand = "x"\n', encoding="utf-8")
     monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(appdata))  # Linux location of the Claude folder
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
     claude_before = json.loads((appdata / "Claude" / "claude_desktop_config.json").read_text(encoding="utf-8"))
     codex_before = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
-    # The real configs may already contain our entry (user connected); after Disconnect it must be gone
-    # and everything else unchanged.
+    # Disconnect removes only our managed entry, keeping unrelated configuration.
     claude_before.get("mcpServers", {}).pop("checkpoint", None)
     if not claude_before.get("mcpServers", True):
         claude_before.pop("mcpServers")
@@ -94,7 +86,7 @@ def test_connect_and_disconnect_on_copies_of_real_configs(tmp_path, monkeypatch)
     assert cfg["mcpServers"]["checkpoint"]["args"] == ["-m", "checkpoint.mcp_server"]
     assert {k: v for k, v in cfg.items() if k != "mcpServers"} == {k: v for k, v in claude_before.items() if k != "mcpServers"}
     toml = tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
-    assert Path(toml["mcp_servers"]["checkpoint"]["command"]).name == "python.exe"
+    assert Path(toml["mcp_servers"]["checkpoint"]["command"]).name == ("python.exe" if os.name == "nt" else Path(sys.executable).name)
     assert (codex_home / "config.toml.checkpoint-backup").is_file()
 
     it.set_connected("claude", False)

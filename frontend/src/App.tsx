@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ListChecks, Radio, Settings as SettingsIcon, Lock, Plus, Pencil } from "lucide-react";
 import { api } from "./api";
 import { useAppState, useCurrentProject, useNoticeToasts, useProjects } from "./state";
-import { Spinner } from "./components/ui";
+import { IS_LINUX, START_SCRIPT, Spinner } from "./components/ui";
 import Home, { ProjectModal } from "./pages/Home";
 import Welcome from "./pages/Welcome";
 import NewSession from "./pages/NewSession";
@@ -22,8 +22,10 @@ function SignedOut() {
         <Lock size={28} className="muted" />
         <h2 style={{ margin: "12px 0 8px" }}>Open Checkpoint from the tray</h2>
         <p className="text-2">
-          For your privacy this page only works when opened by the app itself. Right-click the Checkpoint icon in the
-          Windows notification area and choose <b>Open Checkpoint</b>, or run <code>start.cmd</code> again.
+          For your privacy this page only works when opened by the app itself. {IS_LINUX
+            ? <>Click the Checkpoint icon in the system tray</>
+            : <>Right-click the Checkpoint icon in the Windows notification area</>} and choose <b>Open Checkpoint</b>, or
+          run <code>{START_SCRIPT}</code> again.
         </p>
       </div>
     </div>

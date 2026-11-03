@@ -38,9 +38,14 @@ def _backup(p: Path) -> None:
 
 
 # ------------------------------------------------------------------ Claude Desktop
+def _claude_dir() -> Path:
+    if sys.platform.startswith("linux"):
+        return Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "Claude"
+    return Path(os.environ.get("APPDATA", "")) / "Claude"
+
+
 def claude_config_paths() -> list[Path]:
-    appdata = Path(os.environ.get("APPDATA", ""))
-    paths = [appdata / "Claude" / "claude_desktop_config.json"]
+    paths = [_claude_dir() / "claude_desktop_config.json"]
     pkgs = Path(os.environ.get("LOCALAPPDATA", "")) / "Packages"
     if pkgs.is_dir():  # Microsoft Store build keeps a per-package copy
         paths += [p / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json" for p in pkgs.glob("Claude_*")]
@@ -53,7 +58,7 @@ def _claude_existing() -> list[Path]:
 
 def claude_status() -> dict:
     files = _claude_existing()
-    installed = bool(files) or (Path(os.environ.get("APPDATA", "")) / "Claude").is_dir()
+    installed = bool(files) or _claude_dir().is_dir()
     connected = False
     for p in files:
         try:

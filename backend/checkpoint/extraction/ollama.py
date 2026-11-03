@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import threading
+import weakref
 from typing import Optional, Type
 
+import httpcore
 import httpx
 from pydantic import BaseModel, ValidationError
 
@@ -90,8 +93,10 @@ def ensure_running(base_url: str, wait_s: float = 20) -> bool:
             if sys.platform == "win32":
                 flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
             log.info("Starting Ollama in the background: %s serve", exe)
+            # Own session on POSIX so it keeps running (like on Windows) and a Ctrl+C here doesn't reach it.
             subprocess.Popen([exe, "serve"], env=env, creationflags=flags, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True,
+                             start_new_session=sys.platform != "win32")
             _started_at = time.monotonic()
         deadline = time.monotonic() + wait_s
         while time.monotonic() < deadline:
@@ -101,24 +106,54 @@ def ensure_running(base_url: str, wait_s: float = 20) -> bool:
     return False
 
 
+class _AbortableBackend(httpcore.SyncBackend):
+    """Remembers open connections so an in-flight request can be aborted from another thread.
+    Closing a socket interrupts a blocked read on Windows but not on Linux; shutdown() does both."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._streams: "weakref.WeakSet[httpcore.NetworkStream]" = weakref.WeakSet()
+
+    def connect_tcp(self, *args, **kwargs) -> httpcore.NetworkStream:  # noqa: ANN002, ANN003
+        stream = super().connect_tcp(*args, **kwargs)
+        self._streams.add(stream)
+        return stream
+
+    def abort(self) -> None:
+        for stream in list(self._streams):
+            try:
+                stream.get_extra_info("socket").shutdown(socket.SHUT_RDWR)
+            except (OSError, AttributeError):
+                pass
+
+
 class OllamaProvider:
     def __init__(self, base_url: str, timeout: float = 240, max_retries: int = 2):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
         self._client: Optional[httpx.Client] = None
+        self._backend: Optional[_AbortableBackend] = None
         self._lock = threading.Lock()
         self._think_supported: dict[str, bool] = {}
 
     def _c(self) -> httpx.Client:
         with self._lock:
             if self._client is None:
-                self._client = httpx.Client(base_url=self.base_url, timeout=httpx.Timeout(self.timeout, connect=5))
+                transport = httpx.HTTPTransport()
+                pool = getattr(transport, "_pool", None)
+                if hasattr(pool, "_network_backend"):  # httpx has no public option for the backend
+                    self._backend = pool._network_backend = _AbortableBackend()
+                self._client = httpx.Client(base_url=self.base_url, transport=transport,
+                                            timeout=httpx.Timeout(self.timeout, connect=5))
             return self._client
 
     def close(self) -> None:
         """Also used to abort an in-flight request when a run is cancelled."""
         with self._lock:
+            if self._backend is not None:
+                self._backend.abort()
+                self._backend = None
             if self._client is not None:
                 try:
                     self._client.close()

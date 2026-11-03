@@ -164,10 +164,10 @@ def test_card_caption_is_readable_without_hover_and_pencil_edits(app_env, backgr
     widget.close()
 
 
-@pytest.mark.parametrize('size', [(780, 820), (640, 720)])
-def test_task_editor_keeps_note_readable_and_actions_on_one_row(app_env, size):
+@pytest.mark.parametrize('size', [(900, 820), (1000, 720)])
+def test_task_editor_keeps_note_readable_beside_embedded_image_tools(app_env, size):
     app = application()
-    from PySide6.QtWidgets import QPushButton
+    from PySide6.QtCore import QPoint, QRect
     from checkpoint.desktop.editor import TaskDialog
     from test_simple_inbox import captured
     service, cid, _ = captured(app_env)
@@ -178,36 +178,40 @@ def test_task_editor_keeps_note_readable_and_actions_on_one_row(app_env, size):
     dialog.show()
     app.processEvents()
     try:
+        workspace = dialog.workspaces[cid]
         assert dialog.description.height() >= 240
-        assert dialog.description.height() > dialog.screenshot.height()
         assert dialog.description.toPlainText() == note
-        assert dialog.rect().contains(dialog.description.geometry())
+        assert dialog.images.currentWidget() is workspace
+        description_rect = QRect(dialog.description.mapTo(dialog, QPoint()), dialog.description.size())
+        image_rect = QRect(dialog.images.mapTo(dialog, QPoint()), dialog.images.size())
+        assert dialog.rect().contains(description_rect)
+        assert dialog.rect().contains(image_rect)
+        assert image_rect.right() < description_rect.left()
         assert not dialog.words.isVisible()
-        controls = [button for button in dialog.findChildren(QPushButton)
-                    if button.text() in ('Add to last task', 'Snip image', 'Open menu', 'Captured words')]
-        assert len(controls) == 4
+        controls = [dialog.image_tabs, dialog.add_image_btn, dialog.close_button]
         assert len({button.geometry().center().y() for button in controls}) == 1
         assert all(dialog.rect().contains(button.geometry()) for button in controls)
-        assert dialog.screenshot.rect().contains(dialog.edit_image_btn.geometry())
-        assert dialog.screenshot.rect().contains(dialog.remove_image_btn.geometry())
-        assert dialog.edit_image_btn.x() < dialog.remove_image_btn.x()
-        assert not dialog.previous_image_btn.isVisible()
-        assert not dialog.next_image_btn.isVisible()
+        assert all(workspace.rect().contains(button.geometry()) for button in workspace.tool_buttons.values())
+        assert len({button.geometry().center().y() for button in workspace.tool_buttons.values()}) == 1
+        assert dialog.image_tabs.count() == 1 and dialog.image_tabs.tabData(0) == cid
         dialog.words_button.click()
         app.processEvents()
         assert dialog.words.isVisible() and note in dialog.words.toPlainText()
-        assert dialog.description.height() >= 240
+        assert dialog.description.height() >= 130
+        assert dialog.rect().contains(QRect(dialog.words.mapTo(dialog, QPoint()), dialog.words.size()))
         assert dialog.size().height() <= size[1]
     finally:
         dialog.close()
 
 
-def test_task_editor_image_arrows_edit_and_remove_the_displayed_image(app_env, monkeypatch):
+def test_task_editor_image_tabs_edit_and_remove_the_displayed_image(app_env, monkeypatch):
     app = application()
+    from PySide6.QtWidgets import QTabBar
     from checkpoint.desktop import editor
     from checkpoint.services.inbox import ensure_capture
     from checkpoint.services.review import get_work_item
     from checkpoint.services.task_evidence import bundle_previous
+    from test_screenshot_editor import at, gesture
     from test_simple_inbox import captured
     service, first, _ = captured(app_env)
     iid = service.save_capture_note(first, 'First note')['work_item_id']
@@ -217,29 +221,34 @@ def test_task_editor_image_arrows_edit_and_remove_the_displayed_image(app_env, m
     dialog.show()
     app.processEvents()
     try:
-        assert not dialog.previous_image_btn.isEnabled()
-        dialog.next_image_btn.click()
-        selected = dialog._current_capture_id()
-        assert selected != dialog.captures[0]['capture_id']
-        assert not dialog.next_image_btn.isEnabled()
-        assert dialog.screenshot.counter.text() == '2 / 2'
-        for button in (dialog.previous_image_btn, dialog.next_image_btn, dialog.edit_image_btn, dialog.remove_image_btn):
-            assert dialog.screenshot.rect().contains(button.geometry())
-        screenshot_editor = Mock()
+        assert dialog.image_tabs.count() == 2
+        selected_index = next(index for index in range(dialog.image_tabs.count())
+                              if dialog.image_tabs.tabData(index) == second)
+        dialog.image_tabs.setCurrentIndex(selected_index)
+        app.processEvents()
+        workspace = dialog.workspaces[second]
+        assert dialog.images.currentWidget() is workspace
+        screenshot_editor = Mock(side_effect=AssertionError('Image editing must remain embedded'))
         monkeypatch.setattr(editor, 'ScreenshotDialog', screenshot_editor)
+        confirmation = Mock(return_value=True)
+        monkeypatch.setattr(editor, 'confirm', confirmation)
         dialog.description.setPlainText('Updated note stays intact')
-        dialog.edit_image_btn.click()
-        screenshot_editor.assert_called_once_with(selected, dialog)
-        assert dialog._current_capture_id() == selected
-        dialog.remove_image_btn.click()
-        assert len(dialog.captures) == 1
-        assert dialog._current_capture_id() != selected
-        assert not dialog.previous_image_btn.isVisible()
-        assert not dialog.next_image_btn.isVisible()
-        assert get_work_item(iid)['description'] == 'Updated note stays intact'
-        dialog.remove_image_btn.click()
-        assert not dialog.screenshot.isVisible()
-        assert not dialog.edit_image_btn.isEnabled()
+        workspace.tool_buttons['pencil'].click()
+        gesture(workspace.image, at(workspace.image, 20, 30), at(workspace.image, 100, 30))
+        assert len(workspace.image.marks) == 1
+        dialog.image_tabs.tabButton(selected_index, QTabBar.ButtonPosition.RightSide).click()
+        confirmation.assert_called_once()
+        assert dialog.image_tabs.count() == 1 and dialog.image_tabs.tabData(0) == first
+        assert dialog.images.currentWidget() is dialog.workspaces[first]
+        assert get_work_item(iid)['capture_count'] == 1
+        assert get_work_item(iid)['description'] == 'First note'
+        dialog.image_tabs.tabButton(0, QTabBar.ButtonPosition.RightSide).click()
+        assert dialog.image_tabs.count() == 0
+        assert dialog.images.currentWidget() is dialog.empty_image
         assert dialog.description.toPlainText() == 'Updated note stays intact'
+        dialog._save()
+        assert get_work_item(iid)['description'] == 'Updated note stays intact'
+        assert get_work_item(iid)['capture_count'] == 0
+        screenshot_editor.assert_not_called()
     finally:
         dialog.close()

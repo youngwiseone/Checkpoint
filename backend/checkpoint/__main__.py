@@ -1,4 +1,4 @@
-"""Entry point: `python -m checkpoint` launches the desktop host (Windows)."""
+"""Entry point: `python -m checkpoint` launches the desktop host (Windows and Linux)."""
 
 import sys
 import traceback
@@ -17,6 +17,12 @@ def _fatal(message: str) -> None:
         import ctypes
 
         ctypes.windll.user32.MessageBoxW(None, message[-1500:], "Checkpoint couldn't start", 0x10)
+    elif sys.platform.startswith("linux"):
+        import shutil
+        import subprocess
+
+        if shutil.which("notify-send"):
+            subprocess.run(["notify-send", "-u", "critical", "-a", "Checkpoint", "Checkpoint couldn't start", message[-500:]], check=False)
 
 
 def run() -> int:
@@ -32,8 +38,8 @@ def run() -> int:
             stream.reconfigure(errors="replace")  # never crash on a character the console can't show
         except (AttributeError, ValueError):
             pass
-    if sys.platform != "win32":
-        print("The desktop host (tray, hotkeys, capture) targets Windows. Use `python -m checkpoint.headless` elsewhere.")
+    if sys.platform != "win32" and not sys.platform.startswith("linux"):
+        print("The desktop host (tray, hotkeys, capture) targets Windows and Linux. Use `python -m checkpoint.headless` elsewhere.")
         return 2
     try:
         from .desktop.host import main

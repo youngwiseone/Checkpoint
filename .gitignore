@@ -14,7 +14,7 @@ frontend/dist/
 *.pem
 *.key
 
-# Personal data must never be committed. The app stores it in %LOCALAPPDATA%\Checkpoint,
+# Personal data must never be committed. The app stores it in %LOCALAPPDATA%\Checkpoint (or ~/.local/share),
 # but guard against a data folder or server media placed inside the repo.
 /Checkpoint/
 /SessionCapture/

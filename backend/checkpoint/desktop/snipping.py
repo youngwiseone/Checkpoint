@@ -3,8 +3,8 @@ import io
 from datetime import datetime, timezone
 
 from PIL import Image
-from PySide6.QtCore import QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from ..capture import screen, win32
@@ -20,11 +20,21 @@ class SnippingOverlay(QWidget):
         self.pixmap = QPixmap()
         self.pixmap.loadFromData(grab.png)
         region = grab.monitor['region']
-        tl = logical_point_for_physical(region['left'], region['top'])
-        br = logical_point_for_physical(region['left'] + region['width'] - 1, region['top'] + region['height'] - 1)
+        point = QPoint if grab.monitor.get('region_units') == 'logical' else logical_point_for_physical
+        tl = point(region['left'], region['top'])
+        br = point(region['left'] + region['width'] - 1, region['top'] + region['height'] - 1)
         self.setGeometry(QRect(tl, br))
         self.setCursor(Qt.CursorShape.CrossCursor)
-        self.show()
+        if QGuiApplication.platformName().startswith('wayland'):
+            # The compositor controls window placement. Fullscreen targets a display
+            # without relying on the absolute positioning used by Windows/X11.
+            target = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
+            self.winId()
+            if target:
+                self.windowHandle().setScreen(target)
+            self.showFullScreen()
+        else:
+            self.show()
         win32.exclude_from_capture(int(self.winId()))
         self.activateWindow()
         self.raise_()

@@ -149,11 +149,12 @@ def test_filter_never_leaves_hidden_cards_in_a_batch(app_env):
     from checkpoint.services.review import get_work_item
     app, panel, ids = panel_with_cards()
     panel._select_cards(5, Qt.KeyboardModifier.ShiftModifier)
+    target = next(item['id'] for item in panel.items if item['title'] == 'Card 2')
     panel.search.setText('Card 2')
-    assert panel.selection == {ids[2]}
+    assert panel.selection == {target}
     panel._status('deleted')
-    assert get_work_item(ids[2])['work_status'] == 'deleted'
-    assert all(get_work_item(item_id)['work_status'] == 'open' for item_id in ids if item_id != ids[2])
+    assert get_work_item(target)['work_status'] == 'deleted'
+    assert all(get_work_item(item_id)['work_status'] == 'open' for item_id in ids if item_id != target)
     panel.close()
 
 
