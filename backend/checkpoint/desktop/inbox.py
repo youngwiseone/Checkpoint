@@ -163,6 +163,13 @@ class InboxPanel(QFrame):
         self.notice_timer = QTimer(self, interval=8000, singleShot=True, timeout=self._clear_notice)
 
         footer = QHBoxLayout()
+        footer.addStretch(1)
+        self.merge_button = QPushButton('Merge selected tasks')
+        self.merge_button.setMinimumHeight(48)
+        self.merge_button.setToolTip('Combine only the selected tasks, appending notes and attachments from oldest to newest.')
+        self.merge_button.clicked.connect(self._merge_selected)
+        self.merge_button.hide()
+        footer.addWidget(self.merge_button)
         self.images_button = QPushButton('Open task images')
         self.images_button.setObjectName('primary')
         self.images_button.setIcon(control_icon('images', colors.current().on_accent))
@@ -171,7 +178,6 @@ class InboxPanel(QFrame):
         self.images_button.setAccessibleName('Open unfinished task images to drag into Codex')
         self.images_button.clicked.connect(self._images)
         self.images_button.setMaximumWidth(380)
-        footer.addStretch(1)
         footer.addWidget(self.images_button, 1)
         footer.addStretch(1)
         layout.addLayout(footer)
@@ -727,6 +733,9 @@ class InboxPanel(QFrame):
 
     def _present(self):
         ids = [item['id'] for item in self.items]
+        selected_count = len(self.selection.intersection(ids))
+        self.merge_button.setVisible(selected_count >= 2)
+        self.merge_button.setText(f'Merge {selected_count} selected tasks')
         index = ids.index(self.selected_id) if self.selected_id in ids else 0
         item = self._detail(self.items[index]) if ids else None
         if getattr(self, '_voice_item', None) != (item or {}).get('id'):
@@ -912,6 +921,8 @@ class InboxPanel(QFrame):
         menu.addAction('Mark done', lambda: self._status('done'))
         menu.addAction('Reopen', lambda: self._status('open'))
         menu.addAction('Move to Deleted', lambda: self._status('deleted'))
+        if len(self.selection) >= 2:
+            menu.addAction(f'Merge {len(self.selection)} selected tasks', self._merge_selected)
         menu.addSeparator()
         menu.addAction('Expected behaviour · ignore repeats this session', lambda: self._feedback('expected'))
         menu.addAction('Misheard', lambda: self._feedback('misheard'))
@@ -939,7 +950,23 @@ class InboxPanel(QFrame):
         from ..services.task_evidence import bundle_previous
         try:
             self.selected_id = bundle_previous(self.selected_id)
+            self._clear_selection()
             self.refresh()
+        except ValueError as error:
+            self._notify(str(error))
+
+    def _merge_selected(self):
+        from ..services.task_evidence import merge_work_items
+        selected = [item for item in self.items if item['id'] in self.selection]
+        if len(selected) < 2:
+            return
+        try:
+            self.selected_id = merge_work_items([item['id'] for item in selected],
+                                                {item['id']: item['version'] for item in selected})
+            self.undo_action = None
+            self._clear_selection()
+            self.refresh()
+            self._notify(f'{len(selected)} tasks merged, oldest to newest.')
         except ValueError as error:
             self._notify(str(error))
 

@@ -157,6 +157,50 @@ def test_filter_never_leaves_hidden_cards_in_a_batch(app_env):
     panel.close()
 
 
+def test_merge_button_uses_only_selection_even_when_focus_is_deselected(app_env):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from checkpoint.services.review import get_work_item, list_work_items
+    app, panel, ids = panel_with_cards()
+    try:
+        panel._select_cards(0, Qt.KeyboardModifier.NoModifier)
+        assert not panel.merge_button.isVisible()
+        panel._select_cards(4, Qt.KeyboardModifier.ShiftModifier)
+        panel._select_cards(-3, Qt.KeyboardModifier.ControlModifier)
+        panel._select_cards(2, Qt.KeyboardModifier.ControlModifier)
+        assert panel.selected_id == ids[3] and ids[3] not in panel.selection
+        chosen = {ids[0], ids[2], ids[4]}
+        assert panel.selection == chosen
+        assert panel.merge_button.isVisible() and '3 selected' in panel.merge_button.text()
+        selected = sorted((get_work_item(iid) for iid in chosen), key=lambda item: (item['created_at'], item['id']))
+        untouched = {iid: get_work_item(iid) for iid in ids if iid not in chosen}
+        QTest.mouseClick(panel.merge_button, Qt.MouseButton.LeftButton)
+        target = selected[0]['id']
+        assert panel.selected_id == target and panel.selection == {target}
+        assert not panel.merge_button.isVisible()
+        assert get_work_item(target)['description'] == '\n\n'.join(item['description'] for item in selected)
+        assert {item['id'] for item in list_work_items()} == {target, *untouched}
+        assert all(get_work_item(iid) == before for iid, before in untouched.items())
+    finally:
+        panel.close()
+
+
+def test_merge_conflict_keeps_selection_and_every_task(app_env):
+    from PySide6.QtCore import Qt
+    from checkpoint.services.review import get_work_item, list_work_items, update_work_item
+    app, panel, ids = panel_with_cards()
+    try:
+        panel._select_cards(2, Qt.KeyboardModifier.ShiftModifier)
+        update_work_item(ids[1], {'description': 'Changed elsewhere'})
+        panel.merge_button.click()
+        assert panel.selection == set(ids[:3])
+        assert len(list_work_items()) == 6
+        assert get_work_item(ids[0])['description'] == 'Note 0'
+        assert 'changed elsewhere' in panel.message.text()
+    finally:
+        panel.close()
+
+
 def test_shift_endpoint_button_selects_the_entire_range(app_env):
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest

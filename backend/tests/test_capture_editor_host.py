@@ -67,6 +67,97 @@ def start_voice(host, grab):
     return recording
 
 
+def test_single_capture_button_adds_unsaved_note_and_drawing_to_previous_task(editor_host, app_env):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from checkpoint.desktop.screenshot import Mark
+    from checkpoint.services.review import get_work_item, list_work_items
+    from test_task_merge import task
+    application, host, _ = editor_host
+    previous, c1 = task(app_env, 'Previous task')
+    payload = host.core.capture.hotkey_capture(True)
+    application.processEvents()
+    window = host.note_window
+    source, cid = window.item_id, payload['id']
+    workspace = window.workspaces[cid]
+    workspace.image.remember()
+    workspace.image.marks.append(Mark('pencil', (QPointF(20, 30), QPointF(100, 30)), '#ff4040', 12))
+    window.text.setPlainText('New screenshot and context')
+    assert window.bundle_btn.isVisible() and window.bundle_btn.isEnabled()
+    QTest.mouseClick(window.bundle_btn, Qt.MouseButton.LeftButton)
+    assert window.item_id == previous and window.isVisible()
+    assert window.images.currentWidget() is workspace and not workspace.dirty
+    assert get_work_item(previous)['description'] == 'Previous task\n\nNew screenshot and context'
+    assert [e['capture_id'] for e in get_work_item(previous)['evidence'] if e['kind'] == 'capture'] == [c1, cid]
+    assert get_work_item(source)['work_status'] == 'deleted'
+    assert len(list_work_items()) == 1
+    assert not window.bundle_btn.isEnabled()
+    window._save()
+    assert get_work_item(previous)['description'] == 'Previous task\n\nNew screenshot and context'
+
+
+@pytest.mark.parametrize('phase', ['recording', 'transcribing'])
+def test_add_to_previous_waits_for_held_voice_and_keeps_typed_note(editor_host, app_env, phase):
+    from checkpoint.services.review import get_work_item, list_work_items
+    from test_task_merge import task
+    application, host, grab = editor_host
+    previous, _ = task(app_env, 'Previous note')
+    recording = start_voice(host, grab)
+    window = host.note_window
+    recording.phase = phase
+    window.text.setPlainText('Typed while speaking')
+    window.bundle_btn.click()
+    recording.stop.assert_called_once()
+    assert len(list_work_items()) == 2
+    assert 'Transcribing before adding' in window.dictation_status.text()
+    recording.audio, recording.text, recording.phase = wav_bytes(), 'Spoken context', 'done'
+    host._poll_held_notes()
+    assert window.item_id == previous and window.isVisible()
+    assert get_work_item(previous)['description'] == 'Previous note\n\nTyped while speaking\n\nSpoken context'
+    assert len(list_work_items()) == 1 and not host._held_jobs
+    assert any(e.get('audio_url') for e in get_work_item(previous)['evidence'])
+
+
+def test_add_to_previous_waits_for_local_dictation(editor_host, app_env):
+    from checkpoint.services.review import get_work_item
+    from test_task_merge import task
+    application, host, _ = editor_host
+    previous, _ = task(app_env, 'Previous note')
+    payload = host.core.capture.hotkey_capture(True)
+    application.processEvents()
+    window = host.note_window
+    recording = SimpleNamespace(audio=wav_bytes(), phase='transcribing', text='Dictated context',
+        words=[], error='', retained_note_id=None, stop=Mock(), cancel=Mock())
+    window._dictation, window._dictation_capture = recording, payload['id']
+    window.text.setPlainText('Typed context')
+    window.bundle_btn.click()
+    recording.stop.assert_called_once()
+    recording.phase = 'done'
+    window._poll_dictation()
+    assert window.item_id == previous
+    assert get_work_item(previous)['description'] == 'Previous note\n\nTyped context Dictated context'
+    assert any(e.get('audio_url') for e in get_work_item(previous)['evidence'])
+
+
+def test_hidden_recording_follows_capture_when_tasks_merge_before_transcription(editor_host, app_env):
+    from checkpoint.services.review import get_work_item, list_work_items
+    from checkpoint.services.task_evidence import bundle_previous
+    from checkpoint.settings_store import update_settings
+    from test_task_merge import task
+    application, host, grab = editor_host
+    previous, _ = task(app_env, 'Previous note')
+    update_settings({'capture': {'show_editor_on_capture': False}})
+    recording = start_voice(host, grab)
+    source = host._held_jobs[0][0]['item_id']
+    assert bundle_previous(source) == previous
+    recording.audio, recording.text, recording.phase = wav_bytes(), 'Late spoken context', 'done'
+    host._poll_held_notes()
+    assert len(list_work_items()) == 1 and not host._held_jobs
+    assert get_work_item(previous)['description'] == 'Previous note\n\nLate spoken context'
+    assert any(e.get('audio_url') for e in get_work_item(previous)['evidence'])
+    recording.cancel.assert_not_called()
+
+
 def test_save_during_held_recording_waits_and_keeps_drawing_and_typed_note(editor_host):
     from checkpoint.services.review import get_work_item
     from checkpoint.desktop.screenshot import Mark

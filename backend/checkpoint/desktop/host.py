@@ -241,7 +241,9 @@ class DesktopHost:
         for payload, recording in list(self._held_jobs):
             from ..services.voice import retain, finish_note
             from ..services.review import get_work_item
-            item_id = payload['item_id']
+            # A menu merge can move this capture while its transcript is pending.
+            from ..services.inbox import ensure_capture
+            item_id = payload['item_id'] = ensure_capture(payload['id'])
             if get_work_item(item_id)['work_status'] in ('deleted', 'wont_do'):
                 recording.cancel()
                 self._held_jobs.remove((payload, recording))

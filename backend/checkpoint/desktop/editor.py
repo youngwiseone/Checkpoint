@@ -50,6 +50,7 @@ class CaptureEditor(GlassDialog):
         self._recording_capture = None
         self._dictation_save = self._closing = self._snip_pending = False
         self._save_after_snip = False
+        self._bundle_pending = None
         self.setWindowTitle('Edit capture')
         self.resize(1460, 880)
         self.setMinimumSize(900, 540)
@@ -136,9 +137,6 @@ class CaptureEditor(GlassDialog):
         self.words_button.toggled.connect(self.words.setVisible)
         notes.addWidget(self.words_button)
         notes.addWidget(self.words)
-        self.bundle_btn = QPushButton('Add to previous task')
-        self.bundle_btn.clicked.connect(self._bundle)
-        notes.addWidget(self.bundle_btn)
         self.menu_btn = QPushButton('Open menu')
         self.menu_btn.clicked.connect(self._open_menu)
         notes.addWidget(self.menu_btn)
@@ -161,6 +159,10 @@ class CaptureEditor(GlassDialog):
         self.sub.setObjectName('muted')
         self.sub.setWordWrap(True)
         footer.addWidget(self.sub, 1)
+        self.bundle_btn = QPushButton('Add to previous task')
+        self.bundle_btn.setAccessibleName('Add this capture and note to the previous task')
+        self.bundle_btn.clicked.connect(self._bundle)
+        footer.addWidget(self.bundle_btn)
         self.save_btn = QPushButton('Save')
         self.save_btn.setObjectName('primary')
         self.save_btn.clicked.connect(self._save)
@@ -199,6 +201,7 @@ class CaptureEditor(GlassDialog):
         self._refresh_words()
         self.add_image_btn.setEnabled(bool(self.item_id))
         self.bundle_btn.setVisible(bool(self.item_id))
+        self._update_bundle_button()
         self.discard_btn.setVisible(bool(self.item_id or self.payload.get('id')))
         self.heading.setText('Capture' if self.workspaces else 'Task note')
         self.playback.set_evidence(self.payload.get('evidence', []))
@@ -520,29 +523,57 @@ class CaptureEditor(GlassDialog):
             save = self._save_after_snip
             self._save_after_snip = False
             if error:
+                self._bundle_pending = None
                 self._show_error(error)
             else:
                 self._reload_evidence(select_new=True)
-                if save:
+                if self._bundle_pending:
+                    QTimer.singleShot(0, self._bundle)
+                elif save:
                     # snip_into re-shows its parent after this callback returns.
                     QTimer.singleShot(0, self._save)
         snip_into(self.item_id, self, done)
 
     def _bundle(self):
-        if self._recording or self._dictation:
-            self._show_error('Finish recording before combining tasks.')
+        from ..services.task_evidence import bundle, previous_task
+        try:
+            target_id = self._bundle_pending or previous_task(self.item_id)
+        except ValueError as error:
+            self._show_error(str(error))
             return
+        if self._recording or self._dictation:
+            self._bundle_pending = target_id
+            (self._recording or self._dictation).stop()
+            self.mic_btn.setEnabled(False)
+            self.dictation_status.setText('Transcribing before adding to the previous task…')
+            return
+        if self._snip_pending:
+            self._bundle_pending = target_id
+            self.dictation_status.setText('Finishing screenshot before adding to the previous task…')
+            return
+        self._bundle_pending = None
         if self._commit():
-            from ..services.task_evidence import bundle_previous
             try:
-                self.item_id = bundle_previous(self.item_id)
+                self.item_id = bundle(self.item_id, target_id)
                 self.payload['item_id'] = self.item_id
                 self.item = get_work_item(self.item_id)
                 self.text.setPlainText(self.item['description'])
                 self.payload['text'] = self.item['description']
                 self._reload_evidence()
+                self._update_bundle_button()
+                self.dictation_status.setText('Added to the previous task. You can keep editing or save.')
             except ValueError as error:
                 self._show_error(str(error))
+
+    def _update_bundle_button(self):
+        from ..services.task_evidence import previous_task
+        try:
+            target = get_work_item(previous_task(self.item_id)) if self.item_id else None
+        except ValueError:
+            target = None
+        self.bundle_btn.setEnabled(target is not None)
+        self.bundle_btn.setToolTip(f"Add this task's screenshots, note and recordings to: {target['title']}"
+                                  if target else 'There is no earlier open task in this project.')
 
     def _open_menu(self):
         if self._recording or self._dictation:
@@ -559,7 +590,9 @@ class CaptureEditor(GlassDialog):
         self._focus_capture_input()
 
     def _recording_status(self, recording):
-        if self._dictation_save:
+        if self._bundle_pending:
+            self.dictation_status.setText('Transcribing before adding to the previous task…')
+        elif self._dictation_save:
             self.dictation_status.setText('Transcribing before saving…')
         else:
             self.dictation_status.setText({'starting': 'Opening microphone…',
@@ -579,8 +612,11 @@ class CaptureEditor(GlassDialog):
             self.payload['text'] = self.item['description']
         self.dictation_status.setText('Transcript added. Edit it or save.' if text else 'No speech detected. You can type a note or save the image.')
         if error:
+            self._bundle_pending = None
             self._show_error(error)
-        if save:
+        if self._bundle_pending:
+            self._bundle()
+        elif save:
             self._save()
 
     def _toggle_dictation(self):
@@ -638,10 +674,13 @@ class CaptureEditor(GlassDialog):
             finish_note(recording.retained_note_id, recording.text, getattr(recording, 'words', []))
             self._reload_evidence()
         if recording.error:
+            self._bundle_pending = None
             self._show_error("Couldn't dictate: " + recording.error)
             return
         if not recording.text:
             self.dictation_status.setText('No speech detected. Try again or type your note.')
+            if self._bundle_pending:
+                self._bundle()
             return
         cursor = self.text.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -649,13 +688,16 @@ class CaptureEditor(GlassDialog):
         self.text.setTextCursor(cursor)
         self.dictation_status.setText('Dictation added. Edit it or save your note.')
         self._highlight_uncertain()
-        if save:
+        if self._bundle_pending:
+            self._bundle()
+        elif save:
             self._save()
 
     def _cancel_dictation(self):
         if self._dictation:
             self._dictation.cancel()
         self._dictation = None
+        self._bundle_pending = None
         self._dictation_save = False
         self.dictation_timer.stop()
         self.mic_btn.setEnabled(True)

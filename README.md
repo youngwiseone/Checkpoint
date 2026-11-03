@@ -46,9 +46,11 @@ Double-tap **F9** to edit the last task and take another screenshot as a **Draft
 - Click **+** beside the image tabs to take another screenshot. Click an image's **×** to delete it after confirmation; the note and remaining images stay.
 - Select **Crop**, drag the area to keep, and press **Enter** or click **Apply crop** to enlarge it in the editor. Use **+**, **−**, or **Fit** to change the zoom. **Undo/Redo** (Ctrl+Z / Ctrl+Y) works across annotations and crops.
 - Click **Save** (Ctrl+S) to save the note and all edited images together. **Discard task** moves the task to Deleted after confirmation. **Restore original** previews the untouched screenshot; save to keep the restoration.
+- Tapped **F9** once when you meant to add context to your last task? Click **Add to previous task** beside Save. It combines the new screenshot, note and voice recording with the preceding open task in this project. If speech is still processing, it finishes the transcript first.
 - The sidebar shows **Listening** while you speak and **Transcribing** after you stop; the current speech model produces the transcript after recording. Keep typing or drawing while it processes. Saving during recording stops it and waits for the transcript before saving your combined note and images.
 - Drag **up** to mark Done or **down** to delete. **Undo** restores the change.
 - **Shift** selects a range; **Ctrl-click** adds or removes individual tasks.
+- Select two or more tasks to show **Merge selected tasks** in the menu. It combines only your selection into the oldest selected task, appending notes and attachments in creation order. The other selected cards disappear into that task.
 
 Checkpoint keeps item text and transcripts. By default it removes images and audio **1 day after deletion** or **7 days after Done / archived**, replacing the image with a red or green glass placeholder. Change either period (or choose **Keep forever**) in **Settings → Storage**. Cleanup runs at startup on existing items and hourly while the app is open. Reopening an item before cleanup keeps its attachments; Undo after cleanup restores the text-only item. Attachments still used by another retained item are kept until that item is eligible too.
 

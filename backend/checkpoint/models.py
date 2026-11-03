@@ -369,6 +369,7 @@ class EvidenceLink(Base):
     confidence: Mapped[str] = mapped_column(String(20), default="direct")
     role: Mapped[str] = mapped_column(String(20), default="source")  # source | withdrawal | correction | completion | context
     attached_by: Mapped[str] = mapped_column(String(20), default="system")  # system | ai | user
+    work_item_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     __table_args__ = (
         CheckConstraint("(draft_id IS NOT NULL) OR (work_item_id IS NOT NULL)", name="ck_evidence_owner"),

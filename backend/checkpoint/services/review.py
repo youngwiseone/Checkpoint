@@ -38,10 +38,12 @@ def _iso(d: Optional[datetime]) -> Optional[str]:
 
 
 # ---------------------------------------------------------------- serialisation
-def evidence_payload(s, links: Iterable[EvidenceLink]) -> list[dict]:  # noqa: ANN001
+def evidence_payload(s, links: Iterable[EvidenceLink], *, work_item_order=False) -> list[dict]:  # noqa: ANN001
     out = []
+    positions = {}
     labels: dict[str, str] = {}
     for link in links:
+        positions[link.id] = link.work_item_order
         base = {"id": link.id, "confidence": link.confidence, "role": link.role, "attached_by": link.attached_by}
         if link.capture_id:
             c = s.get(Capture, link.capture_id)
@@ -81,6 +83,10 @@ def evidence_payload(s, links: Iterable[EvidenceLink]) -> list[dict]:  # noqa: A
                         'low_confidence': any(word.get('low') for word in (n.speech_words or [])),
                         "audio_url": f"/api/notes/{n.id}/audio" if n.audio_rel_path and audio_path(n.audio_rel_path).is_file() else None})
     out.sort(key=lambda e: (e.get("offset_ms") is None, e.get("offset_ms") or 0))
+    if work_item_order:
+        # Merged tasks can span sessions whose offsets restart at zero.
+        # New attachments without an explicit position follow the merged content.
+        out.sort(key=lambda e: (positions[e['id']] is None, positions[e['id']] or 0))
     return out
 
 
@@ -125,7 +131,7 @@ def work_item_dict(s, w: WorkItem, with_evidence: bool = False) -> dict:  # noqa
     out['feedback_reason'] = w.feedback_reason
     out["capture_count"] = sum(1 for l in links if l.capture_id)
     if with_evidence:
-        out["evidence"] = evidence_payload(s, links)
+        out["evidence"] = evidence_payload(s, links, work_item_order=True)
         if w.origin == "shared" and w.shared_attachment_ids:
             out["remote_attachments"] = [
                 {"id": a, "url": f"/api/share/attachments/{a}"} for a in (w.shared_attachment_ids or [])

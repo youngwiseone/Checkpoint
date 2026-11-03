@@ -3,7 +3,7 @@ from sqlalchemy import select
 
 from ..db import read_session, write_session
 from ..events import hooks
-from ..models import Capture, DraftItem, EvidenceLink, WorkItem, utcnow
+from ..models import Capture, ChecklistEntry, DraftItem, EvidenceLink, WorkItem, utcnow
 from ..storage import media_path
 
 
@@ -16,7 +16,9 @@ def last_task(project_id, exclude=None, before=None, *, open_only=True):
             query = query.where(WorkItem.id != exclude)
         if before:
             query = query.where(WorkItem.created_at < before)
-        item = s.scalars(query.order_by(WorkItem.human_updated_at.desc(), WorkItem.created_at.desc())).first()
+        order = ((WorkItem.created_at.desc(), WorkItem.id.desc()) if before else
+                 (WorkItem.human_updated_at.desc(), WorkItem.created_at.desc(), WorkItem.id.desc()))
+        item = s.scalars(query.order_by(*order)).first()
         return item.id if item else None
 
 
@@ -108,7 +110,7 @@ def detach_capture(item_id, capture_id):
     hooks.emit_task_ready(item_id)
 
 
-def bundle_previous(item_id):
+def previous_task(item_id):
     with read_session() as s:
         w = s.get(WorkItem, item_id)
         if not w:
@@ -117,34 +119,74 @@ def bundle_previous(item_id):
     target_id = last_task(project_id, exclude=item_id, before=before)
     if not target_id:
         raise ValueError('There is no earlier open task in this project.')
-    return bundle(item_id, target_id)
+    return target_id
+
+
+def bundle_previous(item_id):
+    return bundle(item_id, previous_task(item_id))
 
 
 def bundle(item_id, target_id):
     if item_id == target_id:
         raise ValueError('Choose another task to bundle with.')
+    return merge_work_items([target_id, item_id], target_id=target_id)
+
+
+def merge_work_items(item_ids, expected_versions=None, *, target_id=None):
+    """Merge exactly these tasks atomically, appending oldest to newest."""
+    from .review import evidence_payload
+    ids = set(item_ids)
+    if len(ids) < 2:
+        raise ValueError('Select at least two tasks to merge.')
     with write_session() as s:
-        source, target = s.get(WorkItem, item_id), s.get(WorkItem, target_id)
-        if not source or not target or source.project_id != target.project_id:
+        items = list(s.scalars(select(WorkItem).where(WorkItem.id.in_(ids))
+                              .order_by(WorkItem.created_at, WorkItem.id)).all())
+        if len(items) != len(ids):
+            raise ValueError('Task not found. Refresh your selection.')
+        if len({item.project_id for item in items}) != 1:
             raise ValueError('Tasks must belong to the same project.')
-        links = s.scalars(select(EvidenceLink).where(EvidenceLink.work_item_id == target.id)).all()
-        keys = {(l.capture_id, l.note_id, l.segment_id) for l in links}
-        for l in s.scalars(select(EvidenceLink).where(EvidenceLink.work_item_id == source.id)).all():
-            key = (l.capture_id, l.note_id, l.segment_id)
-            if key not in keys:
-                l.work_item_id = target.id
+        for item in items:
+            if item.duplicate_of_id:
+                raise ValueError('A selected task has already been merged. Refresh your selection.')
+            if expected_versions is not None and expected_versions.get(item.id) != item.version:
+                raise ValueError('A selected task changed elsewhere. Refresh your selection.')
+        target = next((item for item in items if item.id == target_id), None) if target_id else items[0]
+        if target is None:
+            raise ValueError('The destination must be one of the selected tasks.')
+        target_id = target.id
+        groups = []
+        for item in items:
+            links = list(s.scalars(select(EvidenceLink).where(EvidenceLink.work_item_id == item.id)
+                                   .order_by(EvidenceLink.created_at, EvidenceLink.id)).all())
+            by_id = {link.id: link for link in links}
+            groups.append((item, [by_id[entry['id']] for entry in
+                                  evidence_payload(s, links, work_item_order=True)]))
+        keys, text = set(), []
+        position = 0
+        for item, links in groups:
+            extra = item.description.strip() or (item.title if not item.title.startswith('Screenshot · ') else '')
+            if extra:
+                text.append(extra)
+            for link in links:
+                key = (link.capture_id, link.note_id, link.segment_id)
+                if key in keys:
+                    s.delete(link)
+                    continue
                 keys.add(key)
-            else:
-                s.delete(l)
-        extra = source.description.strip() or (source.title if not source.title.startswith('Screenshot · ') else '')
-        if extra and extra not in target.description:
-            target.description = '\n\n'.join(p for p in (target.description.strip(), extra) if p)
-            target.description_edited = True
-        for d in s.scalars(select(DraftItem).where(DraftItem.work_item_id == source.id)).all():
-            d.work_item_id = target.id
-        source.work_status, source.feedback_reason, source.duplicate_of_id = 'deleted', 'duplicate', target.id
-        source.status_changed_at = utcnow()
-        source.version += 1
+                link.work_item_id, link.work_item_order = target_id, position
+                position += 1
+            if item.id == target_id:
+                continue
+            for model in (DraftItem, ChecklistEntry):
+                for row in s.scalars(select(model).where(model.work_item_id == item.id)).all():
+                    row.work_item_id = target_id
+            item.work_status, item.feedback_reason, item.duplicate_of_id = 'deleted', 'duplicate', target_id
+            item.status_changed_at = utcnow()
+            item.version += 1
+        target.description = '\n\n'.join(text)
+        target.description_edited = True
+        if any(item.media_removed_at is None for item in items):
+            target.media_removed_at = None
         target.version += 1
         target.human_updated_at = utcnow()
     hooks.emit_state()
