@@ -48,6 +48,8 @@ export interface HotkeyBinding {
   keys: string;
   registered: boolean;
   error: string | null;
+  external?: boolean; // Linux: bound in the desktop's own shortcut settings
+  command?: string;
 }
 
 export interface SessionOffer {
@@ -85,7 +87,7 @@ export interface AppState {
     app_watch: { alive: boolean; offer: SessionOffer | null; running: string[]; error: string | null };
     sync: { alive: boolean; busy: boolean; offline_reason: string | null; last_ok: string | null; configured: boolean };
   };
-  desktop: { available: boolean; hotkeys: { ok?: boolean; bindings?: HotkeyBinding[]; reason?: string | null } };
+  desktop: { available: boolean; platform?: "windows" | "linux"; hotkeys: { ok?: boolean; external?: boolean; bindings?: HotkeyBinding[]; reason?: string | null } };
   notices: Notice[];
   ai_enabled: boolean;
 }

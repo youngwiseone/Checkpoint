@@ -82,6 +82,12 @@ class Toast(QWidget):
         p.drawEllipse(14, self.height() // 2 - 5, 10, 10)
 
     def show_message(self, level: str, message: str, work: Optional[dict] = None, duration_ms: Optional[int] = None) -> None:
+        if QGuiApplication.platformName() == "wayland":
+            # Wayland won't let a popup place itself; the notification daemon shows it instead.
+            from .notify import notify
+
+            if notify(level, message, duration_ms or (2600 if level != "error" else 6000)):
+                return
         self.level = level
         self.label.setText(message)
         self.label.setStyleSheet(f"color:{css(colors.current().text)};")

@@ -1,21 +1,5 @@
-# Checkpoint desktop app (Windows 11, Python 3.11). Installed by setup.ps1.
-# Direct dependencies are pinned; see requirements.lock.txt for the full resolved set.
-fastapi==0.142.1
-uvicorn[standard]==0.54.0
-pydantic==2.13.5
-SQLAlchemy==2.1.1
-alembic==1.20.0
-httpx==0.28.1
-python-multipart==0.0.32
-mss==10.2.0
-pillow==12.3.0
-numpy==2.4.6
+# Checkpoint desktop app (Windows 11 or Linux, Python 3.11+). Installed by setup.ps1 / setup.sh.
+# Direct dependencies are pinned; see requirements.lock.txt for the full resolved set (Windows).
+-r requirements-core.txt
 PySide6-Essentials==6.11.2
 PyAudioWPatch==0.2.12.8 ; sys_platform == "win32"
-cactus-needle==3.1.0
-av==18.1.0
-huggingface_hub==1.33.0
-keyring==25.7.0
-mcp==2.2.0
-psycopg[binary]==3.3.6
-pytest==9.1.1

@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 def _default_root() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / ".local" / "share")
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return Path(base) / "Checkpoint"
 
 
@@ -132,6 +132,8 @@ class Paths:
 
 
 IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
+START_SCRIPT = "start.sh" if IS_LINUX else "start.cmd"
 HOST = "127.0.0.1"
 DEFAULT_PORT = int(os.environ.get("CHECKPOINT_PORT", "8765"))
 DEV_MODE = os.environ.get("CHECKPOINT_DEV") == "1"

@@ -1,0 +1,20 @@
+# Packages every platform installs; requirements.txt adds the desktop UI and Windows audio.
+# setup.sh installs PySide6 separately on Linux (it may come from the distro).
+fastapi==0.142.1
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+SQLAlchemy==2.1.1
+alembic==1.20.0
+httpx==0.28.1
+python-multipart==0.0.32
+mss==10.2.0
+pillow==12.3.0
+numpy==2.4.6
+cactus-needle==3.1.0
+av==18.1.0
+huggingface_hub==1.33.0
+keyring==25.7.0
+mcp==2.2.0
+psycopg[binary]==3.3.6
+pytest==9.1.1
+jeepney==0.9.0 ; sys_platform == "linux"
